@@ -1,0 +1,114 @@
+name: llm-infrastructure
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-llm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-llm_infra}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llm} -d ${POSTGRES_DB:-llm_infra}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+    # GPU access on the host. Comment out if running CPU-only.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks: [internal]
+
+  bridge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.bridge
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    ports:
+      - "${BRIDGE_PORT:-8000}:8000"
+    networks: [internal, external]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bridge:
+        condition: service_started
+    ports:
+      - "${DASHBOARD_PORT:-8501}:8501"
+    networks: [internal, external]
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    restart: unless-stopped
+    environment:
+      WEBUI_SECRET_KEY: ${OPENWEBUI_SECRET_KEY:-change-me}
+      OPENAI_API_BASE_URL: ${OPENWEBUI_BRIDGE_URL:-http://bridge:8000}/v1
+      OPENAI_API_KEY: "set-via-ui-or-env"
+      ENABLE_OLLAMA_API: "false"
+    volumes:
+      - openwebui_data:/app/backend/data
+    depends_on:
+      bridge:
+        condition: service_started
+    ports:
+      - "3000:8080"
+    networks: [internal, external]
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  openwebui_data:
+
+networks:
+  internal:
+    driver: bridge
+  external:
+    driver: bridge

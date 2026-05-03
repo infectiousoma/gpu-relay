@@ -1,0 +1,11 @@
+FROM ollama/ollama:latest
+
+# Pre-pull the architecture-tier model (qwen2.5-coder 32B).
+# Requires ~18 GB VRAM — RTX 4090 class GPU.
+RUN ollama serve & \
+    sleep 5 && \
+    ollama pull qwen2.5-coder:32b-instruct-q4_K_M && \
+    pkill ollama || true
+
+EXPOSE 11434
+CMD ["ollama", "serve"]

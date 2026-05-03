@@ -1,0 +1,85 @@
+# Tier definitions. Loaded at bridge startup; overridable via DB.
+# Cost figures are list prices for primary provider (RunPod) as of 2026-05.
+
+tiers:
+  simple:
+    gpu: RTX_4090
+    model: qwen2.5-coder:7b-instruct-q4_K_M
+    vram_gb: 4
+    cost_per_hour_usd: 0.34
+    idle_timeout_sec: 300
+    max_context_tokens: 32768
+    use_cases:
+      - quick fixes
+      - code completion
+      - simple debugging
+    routing_signals:
+      max_prompt_tokens: 8000
+      max_files: 3
+
+  architecture:
+    gpu: RTX_4090
+    model: qwen2.5-coder:32b-instruct-q4_K_M
+    vram_gb: 18
+    cost_per_hour_usd: 0.34
+    idle_timeout_sec: 600
+    max_context_tokens: 32768
+    use_cases:
+      - multi-file refactoring
+      - API design
+      - code review
+    routing_signals:
+      max_prompt_tokens: 24000
+      max_files: 20
+      keywords:
+        - architecture
+        - design
+        - refactor
+        - review
+
+  maximum:
+    gpu: A100_40GB
+    model: deepseek-v3:latest-q4_K_M
+    vram_gb: 36
+    cost_per_hour_usd: 1.10
+    idle_timeout_sec: 600
+    max_context_tokens: 65536
+    use_cases:
+      - large codebase analysis
+      - system design
+      - security audits
+    routing_signals:
+      max_prompt_tokens: 60000
+      max_files: 75
+      keywords:
+        - audit
+        - analyze
+        - security
+        - system design
+
+  ultra:
+    gpu: A100_80GB
+    model: qwen2.5:72b-instruct-q4_K_M
+    vram_gb: 48
+    cost_per_hour_usd: 1.89
+    idle_timeout_sec: 600
+    max_context_tokens: 131072
+    use_cases:
+      - full codebase audits
+      - mission-critical designs
+    routing_signals:
+      max_prompt_tokens: 130000
+      max_files: 999
+      keywords:
+        - mission-critical
+        - full audit
+
+# Provider priority. Bridge tries left-to-right; falls back on capacity/error.
+providers:
+  - runpod
+  - vast
+  - lambda
+
+# Tier → preferred provider mapping (override default priority for specific tiers).
+# Example: ultra tier may only be cost-effective on Lambda.
+tier_provider_overrides: {}

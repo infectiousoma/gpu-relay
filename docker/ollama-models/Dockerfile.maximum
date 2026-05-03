@@ -1,0 +1,11 @@
+FROM ollama/ollama:latest
+
+# Pre-pull the maximum-tier model (DeepSeek V3 quantized).
+# Requires ~36 GB VRAM — A100-40GB class GPU.
+RUN ollama serve & \
+    sleep 5 && \
+    ollama pull deepseek-v3:latest-q4_K_M && \
+    pkill ollama || true
+
+EXPOSE 11434
+CMD ["ollama", "serve"]

@@ -1,0 +1,304 @@
+"""GPU pod pool manager.
+
+State machine per pod:
+  provisioning → starting → ready ⟷ draining → terminated | failed
+
+Pool logic:
+  - One pod per (provider, tier) kept warm while last_used + idle_timeout > now.
+  - acquire(tier): return ready pod or spin a new one.
+  - release(pod): update last_used; pool reaper decides termination.
+  - Health loop: GET /api/tags every health_check_interval_sec;
+    3 consecutive fails → mark failed → terminate.
+  - Idle reaper: every idle_reaper_interval_sec, terminate pods past their
+    idle_timeout if no active requests are using them.
+
+Provider selection follows settings.provider_priority_list (RunPod → Vast → Lambda).
+On provider capacity/5xx error, tries next in list before raising.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+import httpx
+import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bridge.schemas import PodHandle
+from bridge.settings import settings
+from database.models import Pod, PodStatus, TierName
+from database.session import SessionLocal
+
+if TYPE_CHECKING:
+    from providers.base import BaseProvider
+
+log = structlog.get_logger(__name__)
+
+
+class InstanceManager:
+    """Singleton accessed via app.state.instance_manager."""
+
+    def __init__(self) -> None:
+        self._lock: asyncio.Lock = asyncio.Lock()
+        self._providers: dict[str, "BaseProvider"] = {}
+        self._active_requests: dict[str, int] = {}  # pod_id → count
+        self._reaper_task: asyncio.Task | None = None
+        self._health_task: asyncio.Task | None = None
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def start(self) -> None:
+        from providers.runpod import RunPodProvider
+        from providers.vast import VastProvider
+        from providers.lambda_labs import LambdaProvider
+
+        self._providers = {
+            "runpod": RunPodProvider(),
+            "vast": VastProvider(),
+            "lambda": LambdaProvider(),
+        }
+        self._reaper_task = asyncio.create_task(self._reaper_loop(), name="idle-reaper")
+        self._health_task = asyncio.create_task(self._health_loop(), name="health-checker")
+        log.info("instance_manager_started")
+
+    async def stop(self) -> None:
+        for task in (self._reaper_task, self._health_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        log.info("instance_manager_stopped")
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def acquire(self, tier: str) -> PodHandle:
+        """Return a ready PodHandle; spins a new pod if none available."""
+        async with SessionLocal() as session:
+            pod = await self._get_ready_pod(tier, session)
+            if pod:
+                return self._handle(pod, cold_start=False)
+
+        # No ready pod — try providers in priority order
+        last_error: Exception | None = None
+        for provider_name in settings.provider_priority_list:
+            provider = self._providers.get(provider_name)
+            if provider is None:
+                continue
+            try:
+                pod_handle = await self._spin_pod(tier, provider_name, provider)
+                return pod_handle
+            except Exception as exc:
+                log.warning("provider_failed", provider=provider_name, tier=tier, error=str(exc))
+                last_error = exc
+
+        raise RuntimeError(f"All providers failed for tier={tier}: {last_error}") from last_error
+
+    def mark_active(self, pod_id: str) -> None:
+        self._active_requests[pod_id] = self._active_requests.get(pod_id, 0) + 1
+
+    async def release(self, pod_id: str, session: AsyncSession) -> None:
+        self._active_requests[pod_id] = max(0, self._active_requests.get(pod_id, 0) - 1)
+        pod = await session.get(Pod, pod_id)
+        if pod:
+            pod.last_used_at = datetime.now(timezone.utc)
+            await session.commit()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _get_ready_pod(self, tier: str, session: AsyncSession) -> Pod | None:
+        result = await session.execute(
+            select(Pod).where(Pod.tier == tier, Pod.status == PodStatus.ready).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def _spin_pod(self, tier: str, provider_name: str, provider: "BaseProvider") -> PodHandle:
+        pod_id = str(uuid.uuid4())
+        log.info("spinning_pod", tier=tier, provider=provider_name, pod_id=pod_id)
+
+        async with SessionLocal() as session:
+            pod = Pod(
+                id=pod_id,
+                provider=provider_name,
+                tier=tier,
+                gpu="",
+                model="",
+                external_id="pending",
+                status=PodStatus.provisioning,
+                cost_per_hour_usd=0,
+            )
+            session.add(pod)
+            await session.commit()
+
+        try:
+            info = await provider.launch(tier)
+        except Exception:
+            async with SessionLocal() as session:
+                pod = await session.get(Pod, pod_id)
+                if pod:
+                    pod.status = PodStatus.failed
+                    await session.commit()
+            raise
+
+        async with SessionLocal() as session:
+            pod = await session.get(Pod, pod_id)
+            pod.external_id = info["external_id"]
+            pod.gpu = info["gpu"]
+            pod.model = info["model"]
+            pod.cost_per_hour_usd = info["cost_per_hour_usd"]
+            pod.endpoint_url = info["endpoint_url"]
+            pod.status = PodStatus.starting
+            await session.commit()
+
+        endpoint = await self._wait_for_ready(info["endpoint_url"], pod_id)
+
+        async with SessionLocal() as session:
+            pod = await session.get(Pod, pod_id)
+            pod.status = PodStatus.ready
+            pod.ready_at = datetime.now(timezone.utc)
+            pod.last_used_at = datetime.now(timezone.utc)
+            await session.commit()
+            return PodHandle(
+                pod_id=pod_id,
+                provider=provider_name,
+                tier=tier,
+                endpoint_url=endpoint,
+                cost_per_hour_usd=float(pod.cost_per_hour_usd),
+                cold_start=True,
+            )
+
+    async def _wait_for_ready(self, endpoint_url: str, pod_id: str) -> str:
+        deadline = asyncio.get_event_loop().time() + settings.cold_start_timeout_sec
+        async with httpx.AsyncClient(timeout=10) as client:
+            while asyncio.get_event_loop().time() < deadline:
+                try:
+                    r = await client.get(f"{endpoint_url}/api/tags")
+                    if r.status_code == 200:
+                        log.info("pod_ready", pod_id=pod_id, endpoint=endpoint_url)
+                        return endpoint_url
+                except Exception:
+                    pass
+                await asyncio.sleep(5)
+        raise TimeoutError(f"Pod {pod_id} did not become ready within {settings.cold_start_timeout_sec}s")
+
+    def _handle(self, pod: Pod, *, cold_start: bool) -> PodHandle:
+        return PodHandle(
+            pod_id=pod.id,
+            provider=pod.provider,
+            tier=pod.tier,
+            endpoint_url=pod.endpoint_url or "",
+            cost_per_hour_usd=float(pod.cost_per_hour_usd),
+            cold_start=cold_start,
+        )
+
+    # ------------------------------------------------------------------
+    # Background loops
+    # ------------------------------------------------------------------
+
+    async def _health_loop(self) -> None:
+        interval = settings.health_check_interval_sec
+        threshold = settings.health_check_fail_threshold
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                async with SessionLocal() as session:
+                    result = await session.execute(
+                        select(Pod).where(Pod.status == PodStatus.ready)
+                    )
+                    pods = result.scalars().all()
+
+                async with httpx.AsyncClient(timeout=5) as client:
+                    for pod in pods:
+                        if not pod.endpoint_url:
+                            continue
+                        try:
+                            r = await client.get(f"{pod.endpoint_url}/api/tags")
+                            if r.status_code == 200:
+                                async with SessionLocal() as session:
+                                    p = await session.get(Pod, pod.id)
+                                    if p:
+                                        p.health_failures = 0
+                                        await session.commit()
+                                continue
+                        except Exception:
+                            pass
+
+                        async with SessionLocal() as session:
+                            p = await session.get(Pod, pod.id)
+                            if not p:
+                                continue
+                            p.health_failures += 1
+                            if p.health_failures >= threshold:
+                                log.error("pod_health_failed", pod_id=pod.id, failures=p.health_failures)
+                                p.status = PodStatus.failed
+                                provider = self._providers.get(pod.provider)
+                                if provider:
+                                    asyncio.create_task(provider.terminate(pod.external_id))
+                            await session.commit()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                log.exception("health_loop_error", error=str(exc))
+
+    async def _reaper_loop(self) -> None:
+        import yaml
+        interval = settings.idle_reaper_interval_sec
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                with open(settings.tiers_config_path) as f:
+                    tier_cfg = yaml.safe_load(f)["tiers"]
+
+                now = datetime.now(timezone.utc)
+                async with SessionLocal() as session:
+                    result = await session.execute(
+                        select(Pod).where(Pod.status == PodStatus.ready)
+                    )
+                    pods = result.scalars().all()
+
+                for pod in pods:
+                    if self._active_requests.get(pod.id, 0) > 0:
+                        continue
+                    idle_timeout = tier_cfg.get(pod.tier, {}).get("idle_timeout_sec", 300)
+                    if pod.last_used_at is None:
+                        continue
+                    last = pod.last_used_at
+                    if last.tzinfo is None:
+                        last = last.replace(tzinfo=timezone.utc)
+                    idle_sec = (now - last).total_seconds()
+                    if idle_sec > idle_timeout:
+                        log.info("reaping_idle_pod", pod_id=pod.id, tier=pod.tier, idle_sec=idle_sec)
+                        async with SessionLocal() as session:
+                            p = await session.get(Pod, pod.id)
+                            if p and p.status == PodStatus.ready:
+                                p.status = PodStatus.terminated
+                                p.terminated_at = now
+                                await session.commit()
+                        provider = self._providers.get(pod.provider)
+                        if provider:
+                            asyncio.create_task(provider.terminate(pod.external_id))
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                log.exception("reaper_loop_error", error=str(exc))
+
+
+_manager: InstanceManager | None = None
+
+
+def get_manager() -> InstanceManager:
+    global _manager
+    if _manager is None:
+        _manager = InstanceManager()
+    return _manager

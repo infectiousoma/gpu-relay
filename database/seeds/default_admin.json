@@ -1,0 +1,18 @@
+{
+  "users": [
+    {
+      "email": "admin@example.com",
+      "role": "admin",
+      "billing_mode": "postpaid",
+      "monthly_budget_usd": 10000.00,
+      "is_active": true,
+      "note": "Bootstrap admin. Password set via `llmctl users set-password` or via env BOOTSTRAP_ADMIN_PASSWORD on first run. API key issued via `llmctl users keys add`."
+    }
+  ],
+  "default_quota": {
+    "requests_per_minute": 60,
+    "tokens_per_day": 1000000,
+    "usd_per_month": 25.00,
+    "max_tier": "ultra"
+  }
+}

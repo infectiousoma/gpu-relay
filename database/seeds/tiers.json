@@ -1,0 +1,40 @@
+{
+  "tiers": [
+    {
+      "name": "simple",
+      "gpu": "RTX_4090",
+      "model": "qwen2.5-coder:7b-instruct-q4_K_M",
+      "vram_gb": 4,
+      "cost_per_hour_usd": 0.34,
+      "idle_timeout_sec": 300,
+      "max_context_tokens": 32768
+    },
+    {
+      "name": "architecture",
+      "gpu": "RTX_4090",
+      "model": "qwen2.5-coder:32b-instruct-q4_K_M",
+      "vram_gb": 18,
+      "cost_per_hour_usd": 0.34,
+      "idle_timeout_sec": 600,
+      "max_context_tokens": 32768
+    },
+    {
+      "name": "maximum",
+      "gpu": "A100_40GB",
+      "model": "deepseek-v3:latest-q4_K_M",
+      "vram_gb": 36,
+      "cost_per_hour_usd": 1.10,
+      "idle_timeout_sec": 600,
+      "max_context_tokens": 65536
+    },
+    {
+      "name": "ultra",
+      "gpu": "A100_80GB",
+      "model": "qwen2.5:72b-instruct-q4_K_M",
+      "vram_gb": 48,
+      "cost_per_hour_usd": 1.89,
+      "idle_timeout_sec": 600,
+      "max_context_tokens": 131072
+    }
+  ]
+}

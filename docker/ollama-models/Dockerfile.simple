@@ -1,0 +1,11 @@
+FROM ollama/ollama:latest
+
+# Pre-pull the simple-tier model (qwen2.5-coder 7B) so the first request
+# doesn't wait for a multi-GB download.
+RUN ollama serve & \
+    sleep 5 && \
+    ollama pull qwen2.5-coder:7b-instruct-q4_K_M && \
+    pkill ollama || true
+
+EXPOSE 11434
+CMD ["ollama", "serve"]

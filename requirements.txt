@@ -1,0 +1,56 @@
+# --- Bridge / API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.27.2
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+sse-starlette==2.2.1
+
+# --- Auth ---
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+
+# --- DB ---
+sqlalchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+asyncpg==0.30.0
+
+# --- Cache / queue ---
+redis==5.2.1
+
+# --- Providers (HTTP only; no SDK lock-in) ---
+tenacity==9.0.0
+
+# --- Local LLM client ---
+ollama==0.4.4
+
+# --- Dashboard ---
+streamlit==1.41.1
+plotly==5.24.1
+pandas==2.2.3
+
+# --- CLI ---
+typer==0.15.1
+click<8.2  # typer 0.15.x is incompatible with click 8.2+ (make_metavar API change)
+rich==13.9.4
+
+# --- Observability ---
+structlog==24.4.0
+prometheus-client==0.21.1
+
+# --- Config ---
+pyyaml==6.0.2
+
+# --- Dev / test ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+respx==0.22.0
+fakeredis[aioredis]==2.26.2
+aiosqlite==0.20.0
+ruff==0.8.4
+mypy==1.13.0
+pre-commit==4.0.1
