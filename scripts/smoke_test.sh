@@ -12,12 +12,11 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
-# Load .env so BOOTSTRAP_ADMIN_PASSWORD etc. are available to this shell
+# Read specific vars from .env without sourcing (values may contain $ chars)
+_dotenv() { grep -E "^$1=" "$REPO/.env" 2>/dev/null | tail -1 | cut -d'=' -f2-; }
 if [ -f "$REPO/.env" ]; then
-    set -o allexport
-    # shellcheck disable=SC1091
-    source "$REPO/.env"
-    set +o allexport
+    : "${BOOTSTRAP_ADMIN_EMAIL:=$(_dotenv BOOTSTRAP_ADMIN_EMAIL)}"
+    : "${BOOTSTRAP_ADMIN_PASSWORD:=$(_dotenv BOOTSTRAP_ADMIN_PASSWORD)}"
 fi
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
