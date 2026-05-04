@@ -97,6 +97,7 @@ class PodHandle(BaseModel):
     tier: str
     endpoint_url: str
     cost_per_hour_usd: float
+    model: str = ""
     cold_start: bool = False
 
 

@@ -180,6 +180,7 @@ class InstanceManager:
                 tier=tier,
                 endpoint_url=endpoint,
                 cost_per_hour_usd=float(pod.cost_per_hour_usd),
+                model=pod.model or "",
                 cold_start=True,
             )
 
@@ -204,6 +205,7 @@ class InstanceManager:
             tier=pod.tier,
             endpoint_url=pod.endpoint_url or "",
             cost_per_hour_usd=float(pod.cost_per_hour_usd),
+            model=pod.model or "",
             cold_start=cold_start,
         )
 

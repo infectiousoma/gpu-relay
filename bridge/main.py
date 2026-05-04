@@ -245,7 +245,7 @@ async def chat_completions(
             completion_tokens = max(1, len(completion_text) // 4)
         else:
             # --- Standard non-streaming ---
-            payload = _build_ollama_payload(body, stream=False)
+            payload = _build_ollama_payload(body, stream=False, ollama_model=pod.model or None)
             async with httpx.AsyncClient(timeout=300) as client:
                 r = await client.post(f"{pod.endpoint_url}/v1/chat/completions", json=payload)
                 r.raise_for_status()
@@ -325,7 +325,7 @@ async def _stream_response(
     idempotency_key, api_key_id, start_ms,
 ):
     """SSE streaming passthrough from Ollama with cost accounting on close."""
-    payload = _build_ollama_payload(body, stream=True)
+    payload = _build_ollama_payload(body, stream=True, ollama_model=pod.model or None)
 
     async def event_generator():
         prompt_tokens = max(1, sum(len(m.content) for m in body.messages if m.content) // 4)
@@ -379,9 +379,9 @@ async def _stream_response(
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
-def _build_ollama_payload(body: ChatCompletionRequest, *, stream: bool) -> dict:
+def _build_ollama_payload(body: ChatCompletionRequest, *, stream: bool, ollama_model: str | None = None) -> dict:
     payload: dict = {
-        "model": body.model,
+        "model": ollama_model or body.model,
         "messages": [{"role": m.role, "content": m.content} for m in body.messages],
         "stream": stream,
     }
