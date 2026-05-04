@@ -58,6 +58,8 @@ services:
       dockerfile: docker/Dockerfile.bridge
     restart: unless-stopped
     env_file: .env
+    environment:
+      MOCK_PROVIDERS: ${MOCK_PROVIDERS:-}
     depends_on:
       postgres:
         condition: service_healthy
