@@ -29,6 +29,7 @@ BRIDGE_URL="${BRIDGE_URL:-http://localhost:8000}"
 DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:8501}"
 ADMIN_EMAIL="${E2E_ADMIN_EMAIL:-${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}}"
 ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-${BOOTSTRAP_ADMIN_PASSWORD:-changeme}}"
+info "Using admin: $ADMIN_EMAIL / ${ADMIN_PASSWORD:0:4}**** (${#ADMIN_PASSWORD} chars)"
 
 # ---------------------------------------------------------------------------
 # 1. Start stack
