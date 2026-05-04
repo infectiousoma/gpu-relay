@@ -86,6 +86,18 @@ All 13 E2E tests pass in mock mode. The 7B coder model runs on CPU (slow but fun
 
 The bridge selects GPUs automatically via `PROVIDER_PRIORITY`. RunPod pods terminate after `idle_timeout_sec` of inactivity; no cost while idle.
 
+Prices in tiers.yaml are estimates only — billing always uses RunPod's actual `costPerHr` from the pod API. The router syncs live GPU prices from RunPod at every startup so budget-gate estimates stay accurate automatically.
+
+**Optional: persistent model cache (recommended)**
+
+Without this, models re-download on every cold start (7B ~2 min, 32B ~15 min).
+
+1. RunPod dashboard → Storage → Network Volumes → create 100 GB volume (same datacenter)
+2. Copy the volume ID
+3. Add to `.env`: `RUNPOD_NETWORK_VOLUME_ID=<id>`
+
+Cost: ~$7-8/month for all tiers. Subsequent cold starts take ~30 s instead of minutes.
+
 ## Development
 
 ```bash

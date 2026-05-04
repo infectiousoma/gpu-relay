@@ -88,16 +88,18 @@ Enabled per-request via `X-Pipeline: preprocess,infer[,postprocess]` or per-user
 
 - One pod per (provider, tier) kept warm while `last_used + idle_timeout > now`.
 - Cold-start budget: `COLD_START_TIMEOUT_SEC` (default 180 s). First-pull cold starts are much longer: 7B ~2 min, 32B ~15 min, 72B ~30 min. Increase to 600+ for production.
-- Models are pulled at pod launch (no persistent volume). Subsequent cold starts after the pod image is cached by RunPod are faster.
+- **Network volume** (optional, recommended): set `RUNPOD_NETWORK_VOLUME_ID` to mount a RunPod persistent volume at `/runpod-volume`. Ollama model cache lives there; subsequent cold starts skip the download entirely (~30 s ready time). Without it, models re-download each cold start.
 - Health probe: `GET /api/tags` on Ollama every 30s. 3 fails → mark unhealthy → drain → terminate.
 - Graceful degradation: provider X 5xx or capacity error → automatically retry next provider in priority list.
 
 ## Critical Features
 
 1. **OpenAI-compatible**: `/v1/chat/completions`, `/v1/completions`, `/v1/models` (lists currently-available tiers as model names, e.g. `llm-simple`, `llm-architecture`).
-2. **Real-time cost calc**: charged seconds = `request_duration + (idle_timeout / shared_users_in_window)`. Returned in `X-LLM-Cost-USD` response header.
-3. **Auto-recovery**: failed pod → spin replacement → replay request (idempotency key required for non-streaming).
-4. **Comprehensive logging**: every request → `audit_log` table (user, tier, provider, latency, tokens, USD).
+2. **Real-time cost calc**: charged seconds = `request_duration + (idle_timeout / shared_users_in_window)`. Returned in `X-LLM-Cost-USD` response header. Uses actual `costPerHr` from provider API — never the tiers.yaml estimate.
+3. **Live price sync**: at startup, `instance_manager` calls `list_gpus()` on each provider and updates in-memory tier cost estimates via `router.refresh_tier_prices()`. Budget-gate projections stay accurate without manual config edits.
+4. **Dynamic GPU selection**: no hardcoded GPU type IDs. `list_gpus()` fetches live catalog; `_select_gpu_offer()` matches by VRAM floor + name preference order.
+5. **Auto-recovery**: failed pod → spin replacement → replay request (idempotency key required for non-streaming).
+6. **Comprehensive logging**: every request → `audit_log` table (user, tier, provider, latency, tokens, USD).
 
 ## Tech Stack
 
@@ -200,6 +202,7 @@ See `.env.example`. Critical ones:
 - `DATABASE_URL` - postgres DSN
 - `REDIS_URL`
 - `RUNPOD_API_KEY`, `VAST_API_KEY`, `LAMBDA_API_KEY`
+- `RUNPOD_NETWORK_VOLUME_ID` - optional; mounts persistent volume for Ollama model cache
 - `PROVIDER_PRIORITY` - comma list, e.g. `runpod,vast,lambda`
 - `OLLAMA_LOCAL_URL` - default `http://ollama:11434` (preprocessor)
 - `BUDGET_DEFAULT_USD` - new-user monthly cap
