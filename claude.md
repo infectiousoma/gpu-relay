@@ -87,7 +87,8 @@ Enabled per-request via `X-Pipeline: preprocess,infer[,postprocess]` or per-user
 ## Instance Pooling
 
 - One pod per (provider, tier) kept warm while `last_used + idle_timeout > now`.
-- Cold-start budget: 90s for RTX 4090, 180s for A100. Bridge returns 202 + Retry-After if cold.
+- Cold-start budget: `COLD_START_TIMEOUT_SEC` (default 180 s). First-pull cold starts are much longer: 7B ~2 min, 32B ~15 min, 72B ~30 min. Increase to 600+ for production.
+- Models are pulled at pod launch (no persistent volume). Subsequent cold starts after the pod image is cached by RunPod are faster.
 - Health probe: `GET /api/tags` on Ollama every 30s. 3 fails → mark unhealthy → drain → terminate.
 - Graceful degradation: provider X 5xx or capacity error → automatically retry next provider in priority list.
 
@@ -141,7 +142,8 @@ llm-infrastructure/
 │   ├── base.py                # ABC: launch, terminate, status, list_gpus
 │   ├── runpod.py
 │   ├── vast.py
-│   └── lambda_labs.py
+│   ├── lambda_labs.py
+│   └── mock.py                # MOCK_PROVIDERS=1 — local Ollama as fake pod
 │
 ├── dashboard/                 # Streamlit
 │   ├── app.py
@@ -175,7 +177,8 @@ llm-infrastructure/
 │       └── Dockerfile.ultra
 │
 ├── scripts/
-│   └── setup.sh                   # one-shot stack setup + bootstrap
+│   ├── setup.sh                   # one-shot stack setup + bootstrap
+│   └── smoke_test.sh              # full E2E: starts stack, manual curl checks, pytest
 │
 └── tests/
     ├── test_router.py
@@ -185,7 +188,8 @@ llm-infrastructure/
     ├── test_cost_tracker.py
     ├── test_integration.py
     ├── test_multi_model.py
-    └── test_pricing.py
+    ├── test_pricing.py
+    └── test_e2e.py              # E2E against live stack; run via smoke_test.sh
 ```
 
 ## Environment Variables

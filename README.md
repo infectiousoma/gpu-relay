@@ -65,10 +65,32 @@ llmctl budget [--email u@example.com]           # spend vs cap progress bars
 llmctl costs [--month 2026-05] [--email ...]    # per-tier cost breakdown
 ```
 
+## Testing locally (no GPU account)
+
+```bash
+# Spins up Ollama instead of renting a GPU pod — no billing
+MOCK_PROVIDERS=1 ./scripts/smoke_test.sh
+```
+
+All 13 E2E tests pass in mock mode. The 7B coder model runs on CPU (slow but functional).
+
+## Switching to RunPod
+
+1. Set `RUNPOD_API_KEY=<key>` in `.env`
+2. Remove or unset `MOCK_PROVIDERS`
+3. Increase cold-start timeout — large model downloads take longer than the 180 s default:
+   ```
+   COLD_START_TIMEOUT_SEC=600   # 7B ~2 min; 32B ~15 min; first pull only
+   ```
+4. `bash scripts/setup.sh` (or restart the stack)
+
+The bridge selects GPUs automatically via `PROVIDER_PRIORITY`. RunPod pods terminate after `idle_timeout_sec` of inactivity; no cost while idle.
+
 ## Development
 
 ```bash
 pip install -r requirements.txt
 pre-commit install
-pytest
+pytest                                      # unit + integration (no Docker)
+MOCK_PROVIDERS=1 ./scripts/smoke_test.sh    # full E2E with live stack
 ```
