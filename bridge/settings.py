@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # --- Providers ---
     provider_priority: str = "runpod,vast,lambda"
     runpod_api_key: str = ""
+    runpod_network_volume_id: str = ""  # optional; if set, pods mount it at /runpod-volume
     vast_api_key: str = ""
     lambda_api_key: str = ""
     mock_providers: bool = False  # set MOCK_PROVIDERS=1 to use local Ollama as provider

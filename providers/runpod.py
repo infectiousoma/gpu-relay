@@ -112,23 +112,33 @@ class RunPodProvider(BaseProvider):
             }
         }
         """
-        variables = {
-            "input": {
-                "cloudType": "SECURE",
-                "gpuCount": 1,
-                "gpuTypeId": offer.gpu_type_id,
-                "containerDiskInGb": 100,
-                "volumeInGb": 0,
-                "minVcpuCount": 2,
-                "minMemoryInGb": 16,
-                "imageName": "ollama/ollama:latest",
-                "dockerArgs": f'/bin/sh -c "ollama serve & sleep 5 && ollama pull {model} && wait"',
-                "env": [{"key": "OLLAMA_MODEL", "value": model}],
-                "ports": "11434/http",
-                "name": f"llm-{tier}",
-                "supportPublicIp": True,
-            }
+        volume_id = settings.runpod_network_volume_id
+        env = [{"key": "OLLAMA_MODEL", "value": model}]
+        if volume_id:
+            # Point Ollama at volume so model cache persists across pod restarts
+            env.append({"key": "OLLAMA_MODELS", "value": "/runpod-volume/ollama"})
+
+        inp: dict = {
+            "cloudType": "SECURE",
+            "gpuCount": 1,
+            "gpuTypeId": offer.gpu_type_id,
+            "containerDiskInGb": 20,
+            "volumeInGb": 50 if volume_id else 0,
+            "minVcpuCount": 2,
+            "minMemoryInGb": 16,
+            "imageName": "ollama/ollama:latest",
+            # ollama pull is idempotent — skips download if model already cached on volume
+            "dockerArgs": f'/bin/sh -c "ollama serve & sleep 5 && ollama pull {model} && wait"',
+            "env": env,
+            "ports": "11434/http",
+            "name": f"llm-{tier}",
+            "supportPublicIp": True,
         }
+        if volume_id:
+            inp["networkVolumeId"] = volume_id
+            inp["volumeMountPath"] = "/runpod-volume"
+
+        variables = {"input": inp}
 
         data = await self._gql(mutation, variables)
         pod_data = data.get("podFindAndDeployOnDemand")
