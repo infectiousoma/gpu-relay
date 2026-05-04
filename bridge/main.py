@@ -34,7 +34,6 @@ from bridge import __version__
 from bridge.auth import (
     AdminUser,
     CurrentUser,
-    TokenResponse,
     create_access_token,
     generate_api_key,
     hash_password,
@@ -57,6 +56,7 @@ from bridge.schemas import (
     LoginRequest,
     ModelInfo,
     ModelsResponse,
+    TokenResponse,
     Usage,
 )
 from bridge.settings import settings
