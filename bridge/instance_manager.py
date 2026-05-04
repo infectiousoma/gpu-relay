@@ -69,6 +69,7 @@ class InstanceManager:
             }
         self._reaper_task = asyncio.create_task(self._reaper_loop(), name="idle-reaper")
         self._health_task = asyncio.create_task(self._health_loop(), name="health-checker")
+        asyncio.create_task(self._sync_prices(), name="price-sync")
         log.info("instance_manager_started")
 
     async def stop(self) -> None:
@@ -212,6 +213,17 @@ class InstanceManager:
     # ------------------------------------------------------------------
     # Background loops
     # ------------------------------------------------------------------
+
+    async def _sync_prices(self) -> None:
+        from bridge.router import refresh_tier_prices
+        offers: dict = {}
+        for name, provider in self._providers.items():
+            try:
+                offers[name] = await provider.list_gpus()
+            except Exception as exc:
+                log.warning("price_sync_failed", provider=name, error=str(exc))
+        if offers:
+            refresh_tier_prices(offers)
 
     async def _health_loop(self) -> None:
         interval = settings.health_check_interval_sec

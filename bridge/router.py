@@ -29,6 +29,34 @@ log = structlog.get_logger(__name__)
 TIER_ORDER = ["simple", "architecture", "maximum", "ultra"]
 
 
+def refresh_tier_prices(offers_by_provider: dict) -> None:
+    """Update in-memory cost estimates from live provider GPU pricing.
+
+    Called at startup so budget-gate projections use real market prices
+    instead of the static values in tiers.yaml.
+    """
+    from providers.base import TIER_GPU_PREFERENCE, TIER_VRAM_REQUIRED
+
+    for tier_name, tier_cfg in _TIERS.items():
+        min_vram = TIER_VRAM_REQUIRED.get(tier_name, 8)
+        prefs = TIER_GPU_PREFERENCE.get(tier_name, [])
+        best_price: float | None = None
+
+        for offers in offers_by_provider.values():
+            candidates = [o for o in offers if o.available and o.vram_gb >= min_vram]
+            for pref in prefs:
+                match = next((o for o in candidates if pref.lower() in o.gpu.lower()), None)
+                if match and (best_price is None or match.cost_per_hour_usd < best_price):
+                    best_price = match.cost_per_hour_usd
+                    break
+
+        if best_price is not None:
+            old = tier_cfg.get("cost_per_hour_usd")
+            tier_cfg["cost_per_hour_usd"] = best_price
+            if old != best_price:
+                log.info("tier_price_synced", tier=tier_name, old=old, new=best_price)
+
+
 def _load_tiers() -> dict:
     with open(settings.tiers_config_path) as f:
         return yaml.safe_load(f)["tiers"]
