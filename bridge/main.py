@@ -135,7 +135,8 @@ async def healthz():
 # ---------------------------------------------------------------------------
 
 @app.get("/v1/models", response_model=ModelsResponse)
-async def list_models(_user: CurrentUser):
+async def list_models(user: CurrentUser):
+    await check_rpm(user.id, get_redis())
     import yaml
     with open(settings.tiers_config_path) as f:
         tiers = yaml.safe_load(f)["tiers"]

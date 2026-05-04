@@ -171,6 +171,9 @@ else
     info "Dashboard not ready (status $DASH_STATUS) — may still be starting"
 fi
 
+# Reset rate-limit counters so pytest starts clean (manual check above exhausted RPM)
+docker compose exec -T redis redis-cli --scan --pattern 'rpm:*' | xargs -r docker compose exec -T redis redis-cli DEL >/dev/null 2>&1 || true
+
 # ---------------------------------------------------------------------------
 # 6. Pytest E2E suite
 # ---------------------------------------------------------------------------
