@@ -82,8 +82,10 @@ done
 # ---------------------------------------------------------------------------
 info "--- Manual smoke checks ---"
 
+CURL="curl -sf --max-time 10"
+
 # Auth login
-TOKEN=$(curl -sf "$BRIDGE_URL/auth/login" \
+TOKEN=$($CURL "$BRIDGE_URL/auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
@@ -91,11 +93,12 @@ TOKEN=$(curl -sf "$BRIDGE_URL/auth/login" \
 if [ -n "$TOKEN" ]; then
     pass "Auth login OK — got token"
 else
-    fail "Auth login failed"
+    fail "Auth login failed — check: docker compose logs bridge"
+    exit 1
 fi
 
 # Models list
-MODELS=$(curl -sf "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null)
+MODELS=$($CURL "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null)
 if [ -n "$MODELS" ] && [ "$MODELS" -ge 4 ]; then
     pass "Models endpoint — $MODELS models listed"
 else
@@ -103,7 +106,7 @@ else
 fi
 
 # Create API key
-KEY_RESP=$(curl -sf "$BRIDGE_URL/auth/keys" \
+KEY_RESP=$($CURL "$BRIDGE_URL/auth/keys" \
     -X POST \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" 2>/dev/null)
@@ -117,7 +120,7 @@ else
 fi
 
 # Use API key
-MODELS2=$(curl -sf "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $API_KEY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null)
+MODELS2=$($CURL "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $API_KEY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null)
 if [ "$MODELS2" -ge 4 ]; then
     pass "API key auth works"
 else
@@ -125,7 +128,7 @@ else
 fi
 
 # Revoke key
-REVOKE_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$BRIDGE_URL/auth/keys/$KEY_ID" \
+REVOKE_STATUS=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$BRIDGE_URL/auth/keys/$KEY_ID" \
     -X DELETE -H "Authorization: Bearer $TOKEN" 2>/dev/null)
 if [ "$REVOKE_STATUS" = "204" ]; then
     pass "API key revoke OK"
@@ -137,7 +140,7 @@ fi
 info "Testing rate limiting (60 RPM)..."
 GOT_429=0
 for i in $(seq 1 65); do
-    CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    CODE=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" \
         "$BRIDGE_URL/v1/models" \
         -H "Authorization: Bearer $TOKEN" 2>/dev/null)
     if [ "$CODE" = "429" ]; then
@@ -152,7 +155,7 @@ else
 fi
 
 # Dashboard health
-DASH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DASHBOARD_URL/_stcore/health" 2>/dev/null || echo "0")
+DASH_STATUS=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$DASHBOARD_URL/_stcore/health" 2>/dev/null || echo "0")
 if [ "$DASH_STATUS" = "200" ]; then
     pass "Dashboard healthy"
 else
