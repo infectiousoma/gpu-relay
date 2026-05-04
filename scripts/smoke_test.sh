@@ -12,6 +12,14 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
+# Load .env so BOOTSTRAP_ADMIN_PASSWORD etc. are available to this shell
+if [ -f "$REPO/.env" ]; then
+    set -o allexport
+    # shellcheck disable=SC1091
+    source "$REPO/.env"
+    set +o allexport
+fi
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 pass() { echo -e "${GREEN}✓${NC} $1"; }
 fail() { echo -e "${RED}✗${NC} $1"; FAILURES=$((FAILURES+1)); }
