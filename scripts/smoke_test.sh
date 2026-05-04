@@ -89,23 +89,24 @@ done
 # ---------------------------------------------------------------------------
 info "--- Manual smoke checks ---"
 
-CURL="curl -sf --max-time 10"
+CURL="curl -s --max-time 10"
 
 # Auth login
-TOKEN=$($CURL "$BRIDGE_URL/auth/login" \
+LOGIN_RESP=$($CURL -X POST "$BRIDGE_URL/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
+    -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" 2>/dev/null) || true
+TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null) || true
 
 if [ -n "$TOKEN" ]; then
     pass "Auth login OK — got token"
 else
-    fail "Auth login failed — check: docker compose logs bridge"
+    fail "Auth login failed (response: $LOGIN_RESP) — check: docker compose logs bridge"
     exit 1
 fi
 
 # Models list
-MODELS=$($CURL "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null)
+MODELS=$($CURL "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $TOKEN" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null) || true
 if [ -n "$MODELS" ] && [ "$MODELS" -ge 4 ]; then
     pass "Models endpoint — $MODELS models listed"
 else
@@ -113,12 +114,11 @@ else
 fi
 
 # Create API key
-KEY_RESP=$($CURL "$BRIDGE_URL/auth/keys" \
-    -X POST \
+KEY_RESP=$($CURL -X POST "$BRIDGE_URL/auth/keys" \
     -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" 2>/dev/null)
-API_KEY=$(echo "$KEY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['key'])" 2>/dev/null)
-KEY_ID=$(echo "$KEY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+    -H "Content-Type: application/json" 2>/dev/null) || true
+API_KEY=$(echo "$KEY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['key'])" 2>/dev/null) || true
+KEY_ID=$(echo "$KEY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null) || true
 
 if [[ "$API_KEY" == sk-llm-* ]]; then
     pass "API key creation OK — prefix $API_KEY"
@@ -127,7 +127,8 @@ else
 fi
 
 # Use API key
-MODELS2=$($CURL "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $API_KEY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null)
+MODELS2=$($CURL "$BRIDGE_URL/v1/models" -H "Authorization: Bearer $API_KEY" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))" 2>/dev/null) || true
 if [ "$MODELS2" -ge 4 ]; then
     pass "API key auth works"
 else
