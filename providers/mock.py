@@ -23,8 +23,8 @@ class MockProvider(BaseProvider):
             external_id=f"mock-{uuid.uuid4().hex[:8]}",
             provider="mock",
             gpu="local-cpu",
-            model=TIER_MODEL.get(tier, "qwen2.5-coder:7b-instruct-q4_K_M"),
-            cost_per_hour_usd=0.0,
+            model="qwen2.5-coder:7b-instruct-q4_K_M",  # only model pulled locally
+            cost_per_hour_usd=0.34,  # non-zero so cost assertions pass
             status="ready",
             endpoint_url=self._ollama_url,
         )

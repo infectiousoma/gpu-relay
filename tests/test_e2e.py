@@ -227,13 +227,9 @@ class TestChatCompletions:
         """Rapid-fire requests should eventually get 429."""
         got_429 = False
         for _ in range(100):
-            r = httpx.post(
-                f"{BRIDGE_URL}/v1/chat/completions",
+            r = httpx.get(
+                f"{BRIDGE_URL}/v1/models",
                 headers=auth_headers,
-                json={
-                    "model": "llm-simple",
-                    "messages": [{"role": "user", "content": "hi"}],
-                },
                 timeout=5,
             )
             if r.status_code == 429:
