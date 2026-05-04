@@ -50,9 +50,9 @@ Multi-tenant, multi-provider LLM serving platform with intelligent tier routing.
 
 | Tier         | GPU         | Model                            | VRAM | $/hr  | Idle TO | Use cases                                       |
 |--------------|-------------|----------------------------------|------|-------|---------|-------------------------------------------------|
-| simple       | RTX 4090    | qwen2.5-coder:7b-instruct-q4     | 4GB  | 0.34  | 5 min   | quick fixes, code completion, simple debug      |
-| architecture | RTX 4090    | qwen2.5-coder:32b-instruct-q4    | 18GB | 0.34  | 10 min  | multi-file refactor, API design, code review    |
-| maximum      | A100 40GB   | deepseek-v3:latest-q4            | 36GB | 1.10  | 10 min  | large codebase analysis, sysdesign, sec audit   |
+| simple       | RTX 4090    | qwen2.5-coder:7b-instruct-q4     | 4GB  | 0.69  | 5 min   | quick fixes, code completion, simple debug      |
+| architecture | RTX 4090    | qwen2.5-coder:32b-instruct-q4    | 18GB | 0.69  | 10 min  | multi-file refactor, API design, code review    |
+| maximum      | L40S        | deepseek-v3:latest-q4            | 36GB | 1.14  | 10 min  | large codebase analysis, sysdesign, sec audit   |
 | ultra        | A100 80GB   | qwen2.5:72b-instruct-q4          | 48GB | 1.89  | 10 min  | full-codebase audits, mission-critical          |
 
 ## Routing Logic (priority order)

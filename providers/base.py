@@ -81,8 +81,8 @@ TIER_VRAM_REQUIRED: dict[str, int] = {
 TIER_GPU_PREFERENCE: dict[str, list[str]] = {
     "simple":       ["4090", "3090", "a40", "a6000"],
     "architecture": ["4090", "3090", "a40", "a6000"],
-    "maximum":      ["a100 40", "a100-40", "a100_40", "a100 sxm4 40"],
-    "ultra":        ["a100 80", "a100-80", "a100_80", "a100 sxm4 80", "h100"],
+    "maximum":      ["l40s", "l40", "a40", "a100 40", "a100-40"],
+    "ultra":        ["a100 80", "a100-80", "a100 sxm4 80", "h100"],
 }
 
 # Ollama model tag per tier

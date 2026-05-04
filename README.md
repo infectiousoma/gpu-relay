@@ -37,9 +37,9 @@ curl -H "Authorization: Bearer $API_KEY" \
 Available models (use as `model` field in OpenAI requests):
 
 **Tier models** (direct GPU rental):
-- `llm-simple` — Qwen2.5-Coder 7B on RTX 4090 — $0.34/hr
-- `llm-architecture` — Qwen2.5-Coder 32B on RTX 4090 — $0.34/hr
-- `llm-maximum` — DeepSeek V3 on A100 40GB — $1.10/hr
+- `llm-simple` — Qwen2.5-Coder 7B on RTX 4090 — $0.69/hr
+- `llm-architecture` — Qwen2.5-Coder 32B on RTX 4090 — $0.69/hr
+- `llm-maximum` — DeepSeek V3 on L40S (48GB) — $1.14/hr
 - `llm-ultra` — Qwen2.5 72B on A100 80GB — $1.89/hr
 - `llm-auto` — let the router pick (default)
 
