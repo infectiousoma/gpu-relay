@@ -158,15 +158,15 @@ class InstanceManager:
 
         async with SessionLocal() as session:
             pod = await session.get(Pod, pod_id)
-            pod.external_id = info["external_id"]
-            pod.gpu = info["gpu"]
-            pod.model = info["model"]
-            pod.cost_per_hour_usd = info["cost_per_hour_usd"]
-            pod.endpoint_url = info["endpoint_url"]
+            pod.external_id = info.external_id
+            pod.gpu = info.gpu
+            pod.model = info.model
+            pod.cost_per_hour_usd = info.cost_per_hour_usd
+            pod.endpoint_url = info.endpoint_url
             pod.status = PodStatus.starting
             await session.commit()
 
-        endpoint = await self._wait_for_ready(info["endpoint_url"], pod_id)
+        endpoint = await self._wait_for_ready(info.endpoint_url, pod_id)
 
         async with SessionLocal() as session:
             pod = await session.get(Pod, pod_id)
