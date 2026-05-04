@@ -65,7 +65,7 @@ fi
 info "Creating bootstrap admin user..."
 docker compose run --rm \
     -e DATABASE_URL \
-    bridge python -m cli.llm_ctl users add "$ADMIN_EMAIL" \
+    bridge python3 -m cli.llm_ctl users add "$ADMIN_EMAIL" \
         --role admin \
         --password "$ADMIN_PASSWORD" \
         --idempotent 2>/dev/null || true

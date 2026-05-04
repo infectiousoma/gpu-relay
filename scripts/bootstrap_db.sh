@@ -25,7 +25,7 @@ done
 
 # 1. Wait for postgres
 echo "==> Waiting for postgres at ${DATABASE_URL%%@*}@..."
-python - <<'PY'
+python3 - <<'PY'
 import asyncio
 import os
 import sys
@@ -56,7 +56,7 @@ if [[ "${WITH_ADMIN}" == "1" ]]; then
     : "${BOOTSTRAP_ADMIN_EMAIL:?BOOTSTRAP_ADMIN_EMAIL must be set}"
     : "${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD must be set}"
     echo "==> Creating bootstrap admin ${BOOTSTRAP_ADMIN_EMAIL}"
-    python -m cli.llm_ctl users add \
+    python3 -m cli.llm_ctl users add \
         "${BOOTSTRAP_ADMIN_EMAIL}" \
         --role admin \
         --password "${BOOTSTRAP_ADMIN_PASSWORD}" \

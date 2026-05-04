@@ -158,7 +158,7 @@ fi
 step "Bootstrapping admin user: $ADMIN_EMAIL"
 if $COMPOSE run --rm \
     -e DATABASE_URL \
-    bridge python -m cli.llm_ctl users add "$ADMIN_EMAIL" \
+    bridge python3 -m cli.llm_ctl users add "$ADMIN_EMAIL" \
         --role admin \
         --password "$ADMIN_PASSWORD" \
         --idempotent 2>&1; then
