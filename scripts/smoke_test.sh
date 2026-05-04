@@ -175,13 +175,21 @@ fi
 # 6. Pytest E2E suite
 # ---------------------------------------------------------------------------
 info "--- Running pytest E2E suite ---"
-if BRIDGE_URL="$BRIDGE_URL" \
-   E2E_ADMIN_EMAIL="$ADMIN_EMAIL" \
-   E2E_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-   python3 -m pytest tests/test_e2e.py -m e2e -v --tb=short 2>&1; then
-    pass "pytest E2E suite passed"
+# Use venv python if available, else system python3
+PYTEST_PYTHON="${REPO}/venv/bin/python3"
+[ -x "$PYTEST_PYTHON" ] || PYTEST_PYTHON="python3"
+
+if ! "$PYTEST_PYTHON" -m pytest --version >/dev/null 2>&1; then
+    info "pytest not found — skipping E2E suite (run: pip install pytest pytest-asyncio)"
 else
-    fail "pytest E2E suite had failures"
+    if BRIDGE_URL="$BRIDGE_URL" \
+       E2E_ADMIN_EMAIL="$ADMIN_EMAIL" \
+       E2E_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+       "$PYTEST_PYTHON" -m pytest tests/test_e2e.py -m e2e -v --tb=short 2>&1; then
+        pass "pytest E2E suite passed"
+    else
+        fail "pytest E2E suite had failures"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
