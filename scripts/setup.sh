@@ -151,9 +151,10 @@ fi
 step "Bootstrapping admin user: $ADMIN_EMAIL"
 if $COMPOSE run --rm \
     -e DATABASE_URL \
-    -e BOOTSTRAP_ADMIN_EMAIL="$ADMIN_EMAIL" \
-    -e BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-    bridge bash scripts/bootstrap_db.sh --with-admin 2>&1; then
+    bridge python -m cli.llm_ctl users add "$ADMIN_EMAIL" \
+        --role admin \
+        --password "$ADMIN_PASSWORD" \
+        --idempotent 2>&1; then
     ok "Admin user ready"
 else
     warn "Admin bootstrap had errors (user may already exist)"
