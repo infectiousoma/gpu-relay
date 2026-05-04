@@ -54,15 +54,19 @@ class InstanceManager:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        from providers.runpod import RunPodProvider
-        from providers.vast import VastProvider
-        from providers.lambda_labs import LambdaProvider
-
-        self._providers = {
-            "runpod": RunPodProvider(),
-            "vast": VastProvider(),
-            "lambda": LambdaProvider(),
-        }
+        if settings.mock_providers:
+            from providers.mock import MockProvider
+            self._providers = {"mock": MockProvider()}
+            log.info("instance_manager_mock_mode")
+        else:
+            from providers.runpod import RunPodProvider
+            from providers.vast import VastProvider
+            from providers.lambda_labs import LambdaProvider
+            self._providers = {
+                "runpod": RunPodProvider(),
+                "vast": VastProvider(),
+                "lambda": LambdaProvider(),
+            }
         self._reaper_task = asyncio.create_task(self._reaper_loop(), name="idle-reaper")
         self._health_task = asyncio.create_task(self._health_loop(), name="health-checker")
         log.info("instance_manager_started")
@@ -90,7 +94,8 @@ class InstanceManager:
 
         # No ready pod — try providers in priority order
         last_error: Exception | None = None
-        for provider_name in settings.provider_priority_list:
+        priority = ["mock"] if settings.mock_providers else settings.provider_priority_list
+        for provider_name in priority:
             provider = self._providers.get(provider_name)
             if provider is None:
                 continue
@@ -134,7 +139,7 @@ class InstanceManager:
                 tier=tier,
                 gpu="",
                 model="",
-                external_id="pending",
+                external_id=f"pending-{pod_id}",
                 status=PodStatus.provisioning,
                 cost_per_hour_usd=0,
             )

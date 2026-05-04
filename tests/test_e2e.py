@@ -142,6 +142,33 @@ class TestUserManagement:
 
 
 # ---------------------------------------------------------------------------
+# Cost tracking verification — must run BEFORE rate-limit test exhausts quota
+# ---------------------------------------------------------------------------
+
+class TestCostTracking:
+    @pytest.mark.skipif(
+        not os.getenv("MOCK_PROVIDERS") and not os.getenv("RUNPOD_API_KEY"),
+        reason="No provider configured",
+    )
+    def test_cost_in_response_headers(self, auth_headers):
+        r = httpx.post(
+            f"{BRIDGE_URL}/v1/chat/completions",
+            headers=auth_headers,
+            json={
+                "model": "llm-simple",
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 5,
+            },
+            timeout=300,
+        )
+        assert r.status_code == 200
+        cost = float(r.headers["x-llm-cost-usd"])
+        assert cost > 0
+        latency = int(r.headers["x-llm-latency-ms"])
+        assert latency > 0
+
+
+# ---------------------------------------------------------------------------
 # Chat completions — with MOCK_PROVIDERS=1 or real providers
 # ---------------------------------------------------------------------------
 
@@ -224,31 +251,6 @@ class TestChatCompletions:
         pytest.skip("Budget enforcement tested in integration suite")
 
 
-# ---------------------------------------------------------------------------
-# Cost tracking verification
-# ---------------------------------------------------------------------------
-
-class TestCostTracking:
-    @pytest.mark.skipif(
-        not os.getenv("MOCK_PROVIDERS") and not os.getenv("RUNPOD_API_KEY"),
-        reason="No provider configured",
-    )
-    def test_cost_in_response_headers(self, auth_headers):
-        r = httpx.post(
-            f"{BRIDGE_URL}/v1/chat/completions",
-            headers=auth_headers,
-            json={
-                "model": "llm-simple",
-                "messages": [{"role": "user", "content": "ping"}],
-                "max_tokens": 5,
-            },
-            timeout=300,
-        )
-        assert r.status_code == 200
-        cost = float(r.headers["x-llm-cost-usd"])
-        assert cost > 0
-        latency = int(r.headers["x-llm-latency-ms"])
-        assert latency > 0
 
 
 # ---------------------------------------------------------------------------

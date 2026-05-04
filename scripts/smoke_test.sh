@@ -185,6 +185,7 @@ else
     if BRIDGE_URL="$BRIDGE_URL" \
        E2E_ADMIN_EMAIL="$ADMIN_EMAIL" \
        E2E_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+       MOCK_PROVIDERS="${MOCK_PROVIDERS:-}" \
        "$PYTEST_PYTHON" -m pytest tests/test_e2e.py -m e2e -v --tb=short 2>&1; then
         pass "pytest E2E suite passed"
     else

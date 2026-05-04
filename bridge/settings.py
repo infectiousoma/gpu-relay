@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     runpod_api_key: str = ""
     vast_api_key: str = ""
     lambda_api_key: str = ""
+    mock_providers: bool = False  # set MOCK_PROVIDERS=1 to use local Ollama as provider
 
     # --- Pool / reaper ---
     idle_reaper_interval_sec: int = 30
