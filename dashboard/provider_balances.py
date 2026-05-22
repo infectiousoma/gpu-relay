@@ -20,11 +20,12 @@ def _runpod_balance() -> dict | None:
     try:
         r = httpx.post(
             f"https://api.runpod.io/graphql?api_key={api_key}",
-            json={"query": "{ myself { creditBalance } }"},
+            json={"query": "query { myself { creditBalance } }"},
             headers={"Content-Type": "application/json"},
             timeout=_TIMEOUT,
         )
-        r.raise_for_status()
+        if not r.is_success:
+            return {"provider": "RunPod", "balance": None, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
         resp = r.json()
         errors = resp.get("errors")
         if errors:
