@@ -9,7 +9,7 @@ import streamlit as st
 from sqlalchemy import select
 
 from dashboard.components.charts import user_spend_bar
-from dashboard.components.metrics import budget_progress, format_usd, status_badge, tier_badge
+from dashboard.components.metrics import budget_progress, format_usd
 from dashboard.db import db_session, get_all_users_with_stats
 from database.models import BillingMode, Quota, TierName, User, UserRole
 
@@ -58,7 +58,9 @@ def _render_user_detail(u: dict) -> None:
         st.markdown(f"**ID:** `{u['id']}`")
         st.markdown(f"**Role:** {u['role']}")
         st.markdown(f"**Billing:** {u['billing_mode']}")
-        st.markdown(f"**Max tier:** {tier_badge(u['max_tier'])}")
+        _allowed = u.get("allowed_tiers")
+        tiers_display = ", ".join(_allowed) if _allowed else "all"
+        st.markdown(f"**Allowed tiers:** {tiers_display}")
         st.markdown(f"**RPM limit:** {u['rpm']}")
         st.markdown(f"**Tokens/day:** {u['tpd']:,}")
         if u["billing_mode"] == "prepaid":
@@ -76,13 +78,15 @@ def _render_user_detail(u: dict) -> None:
         st.markdown("**Edit**")
         fcol1, fcol2, fcol3 = st.columns(3)
 
+        _all_tiers = ["simple", "architecture", "maximum", "ultra"]
         new_budget = fcol1.number_input(
             "Budget USD/month", value=u["monthly_budget_usd"], min_value=0.0, step=5.0, key=f"budget_{u['id']}"
         )
-        new_max_tier = fcol2.selectbox(
-            "Max tier", ["simple", "architecture", "maximum", "ultra"],
-            index=["simple", "architecture", "maximum", "ultra"].index(u["max_tier"]),
-            key=f"tier_{u['id']}",
+        new_allowed_tiers = fcol2.multiselect(
+            "Allowed tiers (empty = all)",
+            _all_tiers,
+            default=u.get("allowed_tiers") or [],
+            key=f"tiers_{u['id']}",
         )
         new_rpm = fcol3.number_input(
             "RPM limit", value=u["rpm"], min_value=1, max_value=1000, step=10, key=f"rpm_{u['id']}"
@@ -108,10 +112,14 @@ def _render_user_detail(u: dict) -> None:
                     user.monthly_budget_usd = Decimal(str(new_budget))
                     if add_credit > 0:
                         user.prepaid_balance_usd += Decimal(str(add_credit))
+                    # None = unrestricted; non-empty list = whitelist
+                    user.allowed_tiers = new_allowed_tiers if new_allowed_tiers else None
                     quota = session.get(Quota, u["id"])
                     if quota:
                         quota.usd_per_month = Decimal(str(new_budget))
-                        quota.max_tier = TierName(new_max_tier)
+                        # Keep max_tier in sync with highest allowed tier
+                        ordered = [t for t in _all_tiers if t in new_allowed_tiers]
+                        quota.max_tier = TierName(ordered[-1] if ordered else "ultra")
                         quota.requests_per_minute = new_rpm
                     session.commit()
             st.success("Saved.")

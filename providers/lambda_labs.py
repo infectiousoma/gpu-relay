@@ -92,6 +92,9 @@ class LambdaProvider(BaseProvider):
     def __init__(self) -> None:
         self._api_key = settings.lambda_api_key
 
+    def is_configured(self) -> bool:
+        return bool(self._api_key)
+
     def _auth(self) -> tuple[str, str]:
         return (self._api_key, "")  # Lambda uses HTTP Basic with key as username
 

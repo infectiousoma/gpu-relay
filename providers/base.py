@@ -107,6 +107,18 @@ class BaseProvider(ABC):
     """Abstract GPU provider adapter."""
 
     name: str = ""
+    provider_type: str = "pod"
+    # "pod"   — full lifecycle: launch, wait-for-ready, pull model, terminate
+    # "local" — Ollama already running; wait-for-ready + pull model; no terminate
+    # "api"   — commercial API; skip all lifecycle; inject auth headers per request
+
+    def is_configured(self) -> bool:
+        """Return False if required credentials are missing; skip this provider at startup."""
+        return True
+
+    def extra_request_headers(self) -> dict[str, str]:
+        """Headers injected into every inference request (e.g. Authorization for API providers)."""
+        return {}
 
     @abstractmethod
     async def launch(self, tier: str) -> PodInfo:

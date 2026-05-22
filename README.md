@@ -1,8 +1,23 @@
 # Self-Hosted LLM Infrastructure
 
-Multi-tenant, multi-provider LLM serving with intelligent tier routing. OpenAI-compatible API in front of RunPod / Vast.ai / Lambda Labs GPUs running Ollama.
+Multi-tenant, OpenAI-compatible LLM gateway. Route requests to cloud GPU pods (RunPod, Vast.ai, Lambda Labs), a local GPU, or commercial APIs — all behind one API endpoint.
 
-See [`claude.md`](./claude.md) for full architecture.
+**Use cases:**
+- Self-host large models (7B–70B) on rented GPUs; pay only when running
+- Drop-in replacement for OpenAI API — works with Open WebUI, Cursor, any OpenAI client
+- Mix providers: local GPU for dev, cloud GPU for heavy loads, OpenAI as fallback
+- Per-user billing, quotas, and tier restrictions for team deployments
+
+## Index
+
+- [Quickstart](#quickstart)
+- [Endpoints](#endpoints)
+- [Tiers & Models](docs/tiers.md)
+- [Providers](docs/providers.md) — RunPod, local GPU, OpenAI, Groq, DeepSeek, etc.
+- [CLI Reference](docs/cli.md) — user management, API keys, billing, observability
+- [Embeddings](docs/embeddings.md)
+- [Preprocessing Pipeline](docs/pipeline.md)
+- [Development & Architecture](docs/development.md)
 
 ## Quickstart
 
@@ -23,86 +38,41 @@ curl -H "Authorization: Bearer $API_KEY" \
 
 ## Endpoints
 
-| Service     | Port | URL                       |
-|-------------|------|---------------------------|
-| Bridge API  | 8000 | http://localhost:8000     |
-| Dashboard   | 8501 | http://localhost:8501     |
-| Open WebUI  | 3000 | http://localhost:3000     |
-| Postgres    | 5432 | (internal)                |
-| Redis       | 6379 | (internal)                |
-| Ollama      | 11434| (internal preprocessor)   |
+| Service | Port | URL |
+|---------|------|-----|
+| Bridge API | 8000 | http://localhost:8000 |
+| Dashboard | 8501 | http://localhost:8501 |
+| Open WebUI | 3000 | http://localhost:3000 |
+| Postgres | 5432 | (internal) |
+| Redis | 6379 | (internal) |
+| Ollama | 11434 | (internal) |
 
-## Tiers
+## Basic Usage
 
-Available models (use as `model` field in OpenAI requests):
-
-**Tier models** (direct GPU rental):
-- `llm-simple` — Qwen2.5-Coder 7B on RTX 4090 — $0.69/hr
-- `llm-architecture` — Qwen2.5-Coder 32B on RTX 4090 — $0.69/hr
-- `llm-maximum` — DeepSeek V3 on L40S (48GB) — $1.14/hr
-- `llm-ultra` — Qwen2.5 72B on A100 80GB — $1.89/hr
-- `llm-auto` — let the router pick (default)
-
-**Workflow models** (multi-step orchestration via Open WebUI):
-- `llm-smart` — local optimizer → best available GPU tier
-- `llm-code-review` — Ollama preprocessor → architecture tier reviewer
-- `llm-refactor` — Ollama preprocessor → architecture tier refactorer
-- `llm-arch-design` — Ollama preprocessor → maximum tier architect
-
-## CLI
+Send requests using the OpenAI API format:
 
 ```bash
-llmctl users add <email>                        # create user, print API key
-llmctl users budget <email> --usd 50            # set monthly cap
-llmctl users credit-add <email> --usd 20        # add prepaid credit
-llmctl pods ls [--tier simple]                  # list running pods
-llmctl pods kill <pod_id>                       # terminate
-llmctl pods start --tier architecture           # prewarm a pod
-llmctl bills run --month 2026-05                # generate invoices
-llmctl models [--user-type personal]            # tier table with effective $/hr
-llmctl status [--tier architecture]             # active pods + running cost
-llmctl budget [--email u@example.com]           # spend vs cap progress bars
-llmctl costs [--month 2026-05] [--email ...]    # per-tier cost breakdown
+# Use a specific tier
+curl -H "Authorization: Bearer $API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"model":"llm-architecture","messages":[{"role":"user","content":"review this code"}]}' \
+     http://localhost:8000/v1/chat/completions
+
+# Let the router pick (based on complexity)
+curl ... -d '{"model":"llm-auto","messages":[...]}'
+
+# Force a tier per-request
+curl -H "X-Tier: simple" ...
 ```
 
-## Testing locally (no GPU account)
+Available models: `llm-simple`, `llm-architecture`, `llm-maximum`, `llm-ultra`, `llm-auto`
+
+See [Tiers & Models](docs/tiers.md) for full details and tier locking options.
+
+## Testing Without a GPU
 
 ```bash
-# Spins up Ollama instead of renting a GPU pod — no billing
 MOCK_PROVIDERS=1 ./scripts/smoke_test.sh
 ```
 
-All 13 E2E tests pass in mock mode. The 7B coder model runs on CPU (slow but functional).
-
-## Switching to RunPod
-
-1. Set `RUNPOD_API_KEY=<key>` in `.env`
-2. Remove or unset `MOCK_PROVIDERS`
-3. Increase cold-start timeout — large model downloads take longer than the 180 s default:
-   ```
-   COLD_START_TIMEOUT_SEC=600   # 7B ~2 min; 32B ~15 min; first pull only
-   ```
-4. `bash scripts/setup.sh` (or restart the stack)
-
-The bridge selects GPUs automatically via `PROVIDER_PRIORITY`. RunPod pods terminate after `idle_timeout_sec` of inactivity; no cost while idle.
-
-Prices in tiers.yaml are estimates only — billing always uses RunPod's actual `costPerHr` from the pod API. The router syncs live GPU prices from RunPod at every startup so budget-gate estimates stay accurate automatically.
-
-**Optional: persistent model cache (recommended)**
-
-Without this, models re-download on every cold start (7B ~2 min, 32B ~15 min).
-
-1. RunPod dashboard → Storage → Network Volumes → create 100 GB volume (same datacenter)
-2. Copy the volume ID
-3. Add to `.env`: `RUNPOD_NETWORK_VOLUME_ID=<id>`
-
-Cost: ~$7-8/month for all tiers. Subsequent cold starts take ~30 s instead of minutes.
-
-## Development
-
-```bash
-pip install -r requirements.txt
-pre-commit install
-pytest                                      # unit + integration (no Docker)
-MOCK_PROVIDERS=1 ./scripts/smoke_test.sh    # full E2E with live stack
-```
+Routes all requests to the local Ollama service — no cloud account, no billing. See [Development](docs/development.md).

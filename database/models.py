@@ -114,6 +114,8 @@ class User(Base):
     prepaid_balance_usd: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     pipeline_default: Mapped[str] = mapped_column(String(64), default="infer", nullable=False)
+    # null = unrestricted; list of TierName values = whitelist
+    allowed_tiers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")

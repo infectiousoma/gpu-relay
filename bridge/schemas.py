@@ -99,6 +99,7 @@ class PodHandle(BaseModel):
     cost_per_hour_usd: float
     model: str = ""
     cold_start: bool = False
+    extra_headers: dict[str, str] = {}  # injected on inference requests (API providers)
 
 
 class CostReceipt(BaseModel):
@@ -134,6 +135,36 @@ class ApiKeyResponse(BaseModel):
     key: str  # plaintext, shown ONCE
     prefix: str
     created_at: str
+
+
+# ---------------------------------------------------------------------------
+# Embeddings (OpenAI-compatible, proxied to local Ollama)
+# ---------------------------------------------------------------------------
+
+class EmbeddingRequest(BaseModel):
+    model: str
+    input: str | list[str]
+    encoding_format: str = "float"
+    dimensions: int | None = None
+    user: str | None = None
+
+
+class EmbeddingData(BaseModel):
+    object: Literal["embedding"] = "embedding"
+    index: int
+    embedding: list[float]
+
+
+class EmbeddingUsage(BaseModel):
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+
+
+class EmbeddingResponse(BaseModel):
+    object: Literal["list"] = "list"
+    data: list[EmbeddingData]
+    model: str
+    usage: EmbeddingUsage
 
 
 # ---------------------------------------------------------------------------

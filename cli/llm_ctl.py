@@ -206,6 +206,56 @@ async def users_list():
     console.print(t)
 
 
+@users_app.command("tiers")
+@async_cmd
+async def users_tiers(
+    email: str,
+    set_tiers: Optional[str] = typer.Option(
+        None, "--set",
+        help="Comma-separated allowed tiers (e.g. 'simple,architecture'), or 'all' to remove restriction",
+    ),
+):
+    """Show or set the allowed-tier whitelist for a user.
+
+    Examples:
+      llmctl users tiers user@example.com               # show current setting
+      llmctl users tiers user@example.com --set simple  # lock to simple only
+      llmctl users tiers user@example.com --set simple,architecture
+      llmctl users tiers user@example.com --set all     # remove restriction
+    """
+    from bridge.router import TIER_ORDER
+
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if not user:
+            err_console.print(f"User not found: {email}")
+            raise typer.Exit(1)
+
+        if set_tiers is not None:
+            if set_tiers.strip().lower() == "all":
+                user.allowed_tiers = None
+                new_val = None
+            else:
+                tiers = [t.strip() for t in set_tiers.split(",") if t.strip()]
+                invalid = [t for t in tiers if t not in TIER_ORDER]
+                if invalid:
+                    err_console.print(f"Unknown tier(s): {invalid}. Valid: {TIER_ORDER}")
+                    raise typer.Exit(1)
+                user.allowed_tiers = tiers
+                new_val = tiers
+            await session.commit()
+            if new_val is None:
+                console.print(f"[green]Tier restriction removed[/green] for {email} (all tiers allowed)")
+            else:
+                console.print(f"[green]Allowed tiers set[/green] for {email}: {new_val}")
+        else:
+            current = user.allowed_tiers
+            if current is None:
+                console.print(f"{email}: [dim]unrestricted[/dim] (all tiers allowed)")
+            else:
+                console.print(f"{email}: allowed tiers = [bold]{current}[/bold]")
+
+
 @users_app.command("deactivate")
 @async_cmd
 async def users_deactivate(email: str):
@@ -287,6 +337,37 @@ async def users_keys_revoke(key_id: str):
         row.revoked_at = datetime.now(timezone.utc)
         await session.commit()
     console.print(f"[yellow]Revoked[/yellow] key {key_id}")
+
+
+@users_app.command("reset-key")
+@async_cmd
+async def users_reset_key(
+    email: str,
+    label: Optional[str] = typer.Option(None, "--label"),
+):
+    """Revoke all active API keys for a user and issue a fresh one. Plaintext shown ONCE."""
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if not user:
+            err_console.print(f"User not found: {email}")
+            raise typer.Exit(1)
+
+        now = datetime.now(timezone.utc)
+        existing = (await session.execute(
+            select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.revoked_at.is_(None))
+        )).scalars().all()
+        for k in existing:
+            k.revoked_at = now
+
+        plaintext, key_hash, prefix = generate_api_key()
+        row = ApiKey(user_id=user.id, key_hash=key_hash, key_prefix=prefix, label=label)
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+
+    console.print(f"[yellow]Revoked {len(existing)} old key(s)[/yellow] for {email}")
+    console.print(f"[green]New API key created[/green] (id={row.id})")
+    console.print(f"[bold yellow]Key (copy now — shown once):[/bold yellow] {plaintext}")
 
 
 @users_app.command("credit-add")

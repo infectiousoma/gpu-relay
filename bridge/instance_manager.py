@@ -62,11 +62,27 @@ class InstanceManager:
             from providers.runpod import RunPodProvider
             from providers.vast import VastProvider
             from providers.lambda_labs import LambdaProvider
-            self._providers = {
-                "runpod": RunPodProvider(),
-                "vast": VastProvider(),
-                "lambda": LambdaProvider(),
+            from providers.local import LocalProvider
+            from providers.api_compat import (
+                OpenAIProvider, GroqProvider, TogetherProvider,
+                MistralProvider, DeepSeekProvider,
+            )
+            candidates = {
+                "runpod":    RunPodProvider(),
+                "vast":      VastProvider(),
+                "lambda":    LambdaProvider(),
+                "local":     LocalProvider(),
+                "openai":    OpenAIProvider(),
+                "groq":      GroqProvider(),
+                "together":  TogetherProvider(),
+                "mistral":   MistralProvider(),
+                "deepseek":  DeepSeekProvider(),
             }
+            self._providers = {n: p for n, p in candidates.items() if p.is_configured()}
+            if not self._providers:
+                log.warning("no_providers_configured")
+            else:
+                log.info("providers_configured", providers=list(self._providers))
         self._reaper_task = asyncio.create_task(self._reaper_loop(), name="idle-reaper")
         self._health_task = asyncio.create_task(self._health_loop(), name="health-checker")
         asyncio.create_task(self._sync_prices(), name="price-sync")
@@ -167,7 +183,13 @@ class InstanceManager:
             pod.status = PodStatus.starting
             await session.commit()
 
-        endpoint = await self._wait_for_ready(info.endpoint_url, pod_id)
+        ptype = provider.provider_type
+        if ptype == "api":
+            endpoint = info.endpoint_url
+        else:
+            endpoint = await self._wait_for_ready(info.endpoint_url, pod_id)
+            if info.model and ptype != "api":
+                await self._pull_model(endpoint, info.model, pod_id)
 
         async with SessionLocal() as session:
             pod = await session.get(Pod, pod_id)
@@ -183,6 +205,7 @@ class InstanceManager:
                 cost_per_hour_usd=float(pod.cost_per_hour_usd),
                 model=pod.model or "",
                 cold_start=True,
+                extra_headers=provider.extra_request_headers(),
             )
 
     async def _wait_for_ready(self, endpoint_url: str, pod_id: str) -> str:
@@ -199,7 +222,22 @@ class InstanceManager:
                 await asyncio.sleep(5)
         raise TimeoutError(f"Pod {pod_id} did not become ready within {settings.cold_start_timeout_sec}s")
 
+    async def _pull_model(self, endpoint_url: str, model: str, pod_id: str) -> None:
+        log.info("pulling_model", pod_id=pod_id, model=model)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=600, write=30, pool=10)) as client:
+            try:
+                r = await client.post(
+                    f"{endpoint_url}/api/pull",
+                    json={"model": model, "stream": False},
+                )
+                r.raise_for_status()
+                log.info("model_pulled", pod_id=pod_id, model=model)
+            except Exception as exc:
+                log.warning("model_pull_failed", pod_id=pod_id, model=model, error=str(exc))
+                raise
+
     def _handle(self, pod: Pod, *, cold_start: bool) -> PodHandle:
+        provider = self._providers.get(pod.provider)
         return PodHandle(
             pod_id=pod.id,
             provider=pod.provider,
@@ -208,6 +246,7 @@ class InstanceManager:
             cost_per_hour_usd=float(pod.cost_per_hour_usd),
             model=pod.model or "",
             cold_start=cold_start,
+            extra_headers=provider.extra_request_headers() if provider else {},
         )
 
     # ------------------------------------------------------------------
@@ -262,7 +301,7 @@ class InstanceManager:
                                 log.error("pod_health_failed", pod_id=pod.id, failures=p.health_failures)
                                 p.status = PodStatus.failed
                                 provider = self._providers.get(pod.provider)
-                                if provider:
+                                if provider and provider.provider_type == "pod":
                                     asyncio.create_task(provider.terminate(pod.external_id))
                             await session.commit()
             except asyncio.CancelledError:
@@ -298,15 +337,18 @@ class InstanceManager:
                     idle_sec = (now - last).total_seconds()
                     if idle_sec > idle_timeout:
                         log.info("reaping_idle_pod", pod_id=pod.id, tier=pod.tier, idle_sec=idle_sec)
+                        terminated = False
                         async with SessionLocal() as session:
-                            p = await session.get(Pod, pod.id)
+                            p = await session.get(Pod, pod.id, with_for_update={"skip_locked": True})
                             if p and p.status == PodStatus.ready:
                                 p.status = PodStatus.terminated
                                 p.terminated_at = now
                                 await session.commit()
-                        provider = self._providers.get(pod.provider)
-                        if provider:
-                            asyncio.create_task(provider.terminate(pod.external_id))
+                                terminated = True
+                        if terminated:
+                            provider = self._providers.get(pod.provider)
+                            if provider and provider.provider_type == "pod":
+                                asyncio.create_task(provider.terminate(pod.external_id))
             except asyncio.CancelledError:
                 return
             except Exception as exc:

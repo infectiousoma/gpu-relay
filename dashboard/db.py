@@ -83,7 +83,7 @@ def get_daily_costs(session: Session, days: int = 30, user_id: str | None = None
         FROM requests
         WHERE status = 'ok'
           AND created_at >= NOW() - INTERVAL ':days days'
-          AND (:user_id IS NULL OR user_id = :user_id)
+          AND (CAST(:user_id AS UUID) IS NULL OR user_id = CAST(:user_id AS UUID))
         GROUP BY day, tier
         ORDER BY day, tier
     """)
@@ -101,7 +101,7 @@ def get_tier_distribution(session: Session, days: int = 30, user_id: str | None 
         FROM requests
         WHERE status = 'ok'
           AND created_at >= NOW() - INTERVAL ':days days'
-          AND (:user_id IS NULL OR user_id = :user_id)
+          AND (CAST(:user_id AS UUID) IS NULL OR user_id = CAST(:user_id AS UUID))
         GROUP BY tier
     """)
     rows = session.execute(q, {"days": days, "user_id": user_id}).fetchall()
@@ -140,6 +140,7 @@ def get_all_users_with_stats(session: Session) -> list[dict]:
             "prepaid_balance_usd": float(u.prepaid_balance_usd),
             "monthly_spend_usd": float(spend),
             "monthly_requests": int(reqs),
+            "allowed_tiers": u.allowed_tiers,  # None = unrestricted
             "max_tier": quota.max_tier if quota else "ultra",
             "rpm": quota.requests_per_minute if quota else 60,
             "tpd": quota.tokens_per_day if quota else 1_000_000,

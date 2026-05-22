@@ -58,6 +58,9 @@ class VastProvider(BaseProvider):
     def __init__(self) -> None:
         self._api_key = settings.vast_api_key
 
+    def is_configured(self) -> bool:
+        return bool(self._api_key)
+
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._api_key}", "Accept": "application/json"}
 

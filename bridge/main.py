@@ -5,6 +5,7 @@ Routes
 GET  /healthz                      — liveness probe
 GET  /v1/models                    — list tiers as model objects
 POST /v1/chat/completions          — main inference (streaming + non-streaming)
+POST /v1/embeddings                — embeddings via local Ollama (no GPU cost)
 POST /auth/login                   — issue JWT
 POST /auth/keys                    — create API key (returns plaintext once)
 DELETE /auth/keys/{key_id}         — revoke API key
@@ -51,6 +52,10 @@ from bridge.schemas import (
     ChatCompletionResponse,
     ChatMessage,
     ChatCompletionChoice,
+    EmbeddingData,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    EmbeddingUsage,
     ErrorDetail,
     ErrorResponse,
     LoginRequest,
@@ -153,6 +158,32 @@ async def list_models(user: CurrentUser):
 
 
 # ---------------------------------------------------------------------------
+# Embeddings (proxied to local Ollama — no GPU cost)
+# ---------------------------------------------------------------------------
+
+@app.post("/v1/embeddings", response_model=EmbeddingResponse)
+async def create_embeddings(body: EmbeddingRequest, user: CurrentUser):
+    await check_rpm(user.id, get_redis())
+    async with httpx.AsyncClient(timeout=60) as client:
+        try:
+            r = await client.post(
+                f"{settings.ollama_local_url}/api/embed",
+                json={"model": settings.ollama_embedding_model, "input": body.input},
+            )
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Embedding service error: {exc}")
+    data = r.json()
+    embeddings: list[list[float]] = data.get("embeddings", [])
+    prompt_tokens: int = data.get("prompt_eval_count", 0)
+    return EmbeddingResponse(
+        data=[EmbeddingData(index=i, embedding=emb) for i, emb in enumerate(embeddings)],
+        model=settings.ollama_embedding_model,
+        usage=EmbeddingUsage(prompt_tokens=prompt_tokens, total_tokens=prompt_tokens),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Chat completions (primary route)
 # ---------------------------------------------------------------------------
 
@@ -205,14 +236,13 @@ async def chat_completions(
     await check_monthly_budget(user, decision.projected_cost_usd, session, redis)
 
     # --- Multi-model pipeline (preprocess stage, non-workflow only) ---
-    pipeline = body.pipeline or user.pipeline_default or "infer"
+    pipeline = body.pipeline or user.pipeline_default or settings.pipeline_default
     pipeline_meta: dict = {"stages_run": [], "preprocessor_output": None, "errors": []}
     if not workflow_def:
         body, pipeline_meta = await run_pipeline(body, pipeline)
 
     # --- Acquire pod ---
     pod = await manager.acquire(decision.tier)
-    manager.mark_active(pod.pod_id)
 
     # Track user on pod (for concurrent-user cost calc)
     await redis.sadd(f"pod_users:{pod.pod_id}", user.id)
@@ -221,6 +251,16 @@ async def chat_completions(
     idempotency_key = request.headers.get("x-idempotency-key")
     api_key_id = getattr(request.state, "api_key_id", None)
 
+    # Streaming: mark_active/release/record_request happen inside event_generator
+    # so the active count is accurate during the stream and billing uses real token counts.
+    if body.stream and not workflow_def:
+        return await _stream_response(
+            body, pod, decision, pipeline, pipeline_meta,
+            user, session, redis, manager, request,
+            idempotency_key, api_key_id,
+        )
+
+    manager.mark_active(pod.pod_id)
     start_ms = int(time.time() * 1000)
     error_message: str | None = None
     completion_text = ""
@@ -228,13 +268,6 @@ async def chat_completions(
     completion_tokens = 0
 
     try:
-        if body.stream and not workflow_def:
-            return await _stream_response(
-                body, pod, decision, pipeline, pipeline_meta,
-                user, session, redis, manager, request,
-                idempotency_key, api_key_id, start_ms,
-            )
-
         if workflow_def:
             # --- Workflow orchestration ---
             orchestrator = WorkflowOrchestrator()
@@ -246,9 +279,13 @@ async def chat_completions(
             completion_tokens = max(1, len(completion_text) // 4)
         else:
             # --- Standard non-streaming ---
-            payload = _build_ollama_payload(body, stream=False, ollama_model=pod.model or None)
+            payload = _build_inference_payload(body, stream=False, model=pod.model or None)
             async with httpx.AsyncClient(timeout=300) as client:
-                r = await client.post(f"{pod.endpoint_url}/v1/chat/completions", json=payload)
+                r = await client.post(
+                    f"{pod.endpoint_url}/v1/chat/completions",
+                    json=payload,
+                    headers=pod.extra_headers,
+                )
                 r.raise_for_status()
                 data = r.json()
 
@@ -323,18 +360,20 @@ async def chat_completions(
 async def _stream_response(
     body, pod, decision, pipeline, pipeline_meta,
     user, session, redis, manager, request,
-    idempotency_key, api_key_id, start_ms,
+    idempotency_key, api_key_id,
 ):
     """SSE streaming passthrough from Ollama with cost accounting on close."""
-    payload = _build_ollama_payload(body, stream=True, ollama_model=pod.model or None)
+    payload = _build_inference_payload(body, stream=True, model=pod.model or None)
 
     async def event_generator():
+        start_ms = int(time.time() * 1000)
+        manager.mark_active(pod.pod_id)
         prompt_tokens = max(1, sum(len(m.content) for m in body.messages if m.content) // 4)
         completion_tokens = 0
         error_message = None
         try:
             async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream("POST", f"{pod.endpoint_url}/v1/chat/completions", json=payload) as resp:
+                async with client.stream("POST", f"{pod.endpoint_url}/v1/chat/completions", json=payload, headers=pod.extra_headers) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if line.startswith("data: "):
@@ -380,18 +419,18 @@ async def _stream_response(
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
-def _build_ollama_payload(body: ChatCompletionRequest, *, stream: bool, ollama_model: str | None = None) -> dict:
+def _build_inference_payload(body: ChatCompletionRequest, *, stream: bool, model: str | None = None) -> dict:
     payload: dict = {
-        "model": ollama_model or body.model,
+        "model": model or body.model,
         "messages": [{"role": m.role, "content": m.content} for m in body.messages],
         "stream": stream,
     }
     if body.temperature is not None:
-        payload["options"] = payload.get("options", {})
-        payload["options"]["temperature"] = body.temperature
+        payload["temperature"] = body.temperature
     if body.max_tokens is not None:
-        payload["options"] = payload.get("options", {})
-        payload["options"]["num_predict"] = body.max_tokens
+        payload["max_tokens"] = body.max_tokens
+    if body.stop is not None:
+        payload["stop"] = body.stop
     return payload
 
 

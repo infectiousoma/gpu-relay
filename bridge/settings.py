@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # --- Local Ollama (preprocessor) ---
     ollama_local_url: str = "http://ollama:11434"
     ollama_preprocessor_model: str = "qwen2.5-coder:7b-instruct-q4_K_M"
+    ollama_embedding_model: str = "nomic-embed-text"
 
     # --- Providers ---
     provider_priority: str = "runpod,vast,lambda"
@@ -45,10 +46,22 @@ class Settings(BaseSettings):
     vast_api_key: str = ""
     lambda_api_key: str = ""
     mock_providers: bool = False  # set MOCK_PROVIDERS=1 to use local Ollama as provider
+    pipeline_default: str = "infer"  # global default pipeline; per-user and per-request override this
+
+    # --- Commercial API providers (OpenAI-compatible) ---
+    openai_api_key: str = ""
+    openai_model_simple: str = ""        # override default gpt-4o-mini
+    openai_model_architecture: str = ""  # override default gpt-4o
+    openai_model_maximum: str = ""
+    openai_model_ultra: str = ""
+    groq_api_key: str = ""
+    together_api_key: str = ""
+    mistral_api_key: str = ""
+    deepseek_api_key: str = ""
 
     # --- Pool / reaper ---
     idle_reaper_interval_sec: int = 30
-    cold_start_timeout_sec: int = 180
+    cold_start_timeout_sec: int = 600
     health_check_interval_sec: int = 30
     health_check_fail_threshold: int = 3
 
@@ -64,6 +77,13 @@ class Settings(BaseSettings):
 
     # --- Open WebUI bridge link ---
     openwebui_bridge_url: str = "http://bridge:8000"
+
+    @field_validator("mock_providers", mode="before")
+    @classmethod
+    def _bool_from_empty(cls, v: object) -> object:
+        if v == "":
+            return False
+        return v
 
     @field_validator("bridge_log_level")
     @classmethod

@@ -62,6 +62,9 @@ class RunPodProvider(BaseProvider):
     def __init__(self) -> None:
         self._api_key = settings.runpod_api_key
 
+    def is_configured(self) -> bool:
+        return bool(self._api_key)
+
     def _headers(self) -> dict:
         return {"Content-Type": "application/json"}
 
@@ -78,7 +81,14 @@ class RunPodProvider(BaseProvider):
             data = r.json()
         if "errors" in data:
             msgs = [e.get("message", str(e)) for e in data["errors"]]
-            raise ProviderError(f"RunPod GQL error: {'; '.join(msgs)}", retryable=False)
+            unique_msgs = list(dict.fromkeys(msgs))  # deduplicate while preserving order
+            combined = "; ".join(unique_msgs)
+            # "Something went wrong. Please try again later" = transient API issue
+            retryable = any(
+                "try again" in m.lower() or "something went wrong" in m.lower()
+                for m in unique_msgs
+            )
+            raise ProviderError(f"RunPod GQL error: {combined}", retryable=retryable)
         return data.get("data", {})
 
     # ------------------------------------------------------------------
@@ -107,15 +117,15 @@ class RunPodProvider(BaseProvider):
                 desiredStatus
                 imageName
                 env
-                machineId
                 machine { podHostId gpuDisplayName costPerHr }
             }
         }
         """
         volume_id = settings.runpod_network_volume_id
+        if volume_id:
+            await self._validate_network_volume(volume_id)
         env = [{"key": "OLLAMA_MODEL", "value": model}]
         if volume_id:
-            # Point Ollama at volume so model cache persists across pod restarts
             env.append({"key": "OLLAMA_MODELS", "value": "/runpod-volume/ollama"})
 
         inp: dict = {
@@ -127,8 +137,8 @@ class RunPodProvider(BaseProvider):
             "minVcpuCount": 2,
             "minMemoryInGb": 16,
             "imageName": "ollama/ollama:latest",
-            # ollama pull is idempotent — skips download if model already cached on volume
-            "dockerArgs": f'/bin/sh -c "ollama serve & sleep 5 && ollama pull {model} && wait"',
+            # ollama/ollama uses ENTRYPOINT ["/bin/ollama"] CMD ["serve"] —
+            # no dockerArgs override; model is pulled after readiness via API.
             "env": env,
             "ports": "11434/http",
             "name": f"llm-{tier}",
@@ -169,11 +179,29 @@ class RunPodProvider(BaseProvider):
             podTerminate(input: $input)
         }
         """
-        try:
-            await self._gql(mutation, {"input": {"podId": external_id}})
-            log.info("runpod_pod_terminated", external_id=external_id)
-        except Exception as exc:
-            log.warning("runpod_terminate_error", external_id=external_id, error=str(exc))
+        for attempt in range(3):
+            try:
+                await self._gql(mutation, {"input": {"podId": external_id}})
+                log.info("runpod_pod_terminated", external_id=external_id, attempt=attempt + 1)
+                return
+            except Exception as exc:
+                if attempt < 2:
+                    wait = 4 * (attempt + 1)
+                    log.warning(
+                        "runpod_terminate_retry",
+                        external_id=external_id,
+                        attempt=attempt + 1,
+                        retry_in=wait,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    log.error(
+                        "runpod_terminate_failed",
+                        external_id=external_id,
+                        error=str(exc),
+                        msg="Pod may still be running on RunPod — terminate manually",
+                    )
 
     async def get_status(self, external_id: str) -> PodInfo:
         query = """
@@ -217,7 +245,6 @@ class RunPodProvider(BaseProvider):
                 memoryInGb
                 securePrice
                 communityPrice
-                lowestPrice { minimumBidPrice uninterruptablePrice }
             }
         }
         """
@@ -225,10 +252,6 @@ class RunPodProvider(BaseProvider):
         offers: list[GpuOffer] = []
         for g in data.get("gpuTypes", []):
             price = g.get("securePrice") or g.get("communityPrice") or 0
-            if price == 0:
-                # Try lowestPrice
-                lp = g.get("lowestPrice") or {}
-                price = lp.get("uninterruptablePrice") or lp.get("minimumBidPrice") or 0
             offers.append(
                 GpuOffer(
                     provider=self.name,
@@ -258,6 +281,18 @@ class RunPodProvider(BaseProvider):
         # Return proxy URL pattern even if not confirmed — InstanceManager
         # will do the Ollama readiness probe.
         return f"https://{external_id}-{OLLAMA_PORT}.proxy.runpod.net"
+
+    async def _validate_network_volume(self, volume_id: str) -> None:
+        data = await self._gql("{ myself { networkVolumes { id } } }")
+        volumes = data.get("myself", {}).get("networkVolumes", [])
+        ids = [v["id"] for v in volumes]
+        if volume_id not in ids:
+            raise ProviderError(
+                f"RunPod network volume '{volume_id}' not found on account "
+                f"(found: {ids or 'none'}). "
+                "Create one at runpod.io/console/user/storage or clear RUNPOD_NETWORK_VOLUME_ID.",
+                retryable=False,
+            )
 
     @staticmethod
     def _extract_endpoint(pod: dict) -> str:
