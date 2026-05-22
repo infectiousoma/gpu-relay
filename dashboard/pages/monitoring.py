@@ -100,8 +100,8 @@ def render() -> None:
     if all_pods:
         import pandas as pd
         df = pd.DataFrame(all_pods)
-        df["started_at"] = df["started_at"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M") if x else "")
-        df["terminated_at"] = df["terminated_at"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M") if x else "")
+        df["started_at"] = df["started_at"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M") if pd.notna(x) and x else "")
+        df["terminated_at"] = df["terminated_at"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M") if pd.notna(x) and x else "")
         df["cost_per_hour_usd"] = df["cost_per_hour_usd"].apply(lambda x: f"${x:.2f}")
         st.dataframe(df, use_container_width=True, height=300)
 

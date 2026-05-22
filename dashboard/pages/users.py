@@ -50,6 +50,10 @@ def render() -> None:
         ):
             _render_user_detail(u)
 
+    st.divider()
+    with st.expander("➕ Add New User", expanded=False):
+        _render_add_user_form()
+
 
 def _render_user_detail(u: dict) -> None:
     col1, col2 = st.columns(2)
@@ -135,10 +139,6 @@ def _render_user_detail(u: dict) -> None:
             st.success(f"{action} {u['email']}.")
             st.rerun()
 
-    # --- Add new user ---
-    st.divider()
-    with st.expander("➕ Add New User", expanded=False):
-        _render_add_user_form()
 
 
 def _render_add_user_form() -> None:
