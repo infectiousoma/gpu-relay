@@ -59,17 +59,22 @@ def _login_page() -> None:
                 st.error("Invalid credentials.")
 
 
+def _is_admin() -> bool:
+    return st.session_state.get("user_role") == "admin"
+
+
 def _sidebar_nav() -> str:
     with st.sidebar:
         st.markdown("## 🤖 LLM Dashboard")
-        st.caption(f"Signed in as **{st.session_state.get('user_email', '?')}**")
+        role_label = " 👑 Admin" if _is_admin() else ""
+        st.caption(f"Signed in as **{st.session_state.get('user_email', '?')}**{role_label}")
         st.divider()
 
-        page = st.radio(
-            "Navigate",
-            ["📊 Overview", "📈 Analytics", "👥 Users", "💳 Billing", "🖥️ Monitoring"],
-            label_visibility="collapsed",
-        )
+        pages = ["📊 Overview", "📈 Analytics", "💳 Billing"]
+        if _is_admin():
+            pages += ["👥 Users", "🖥️ Monitoring"]
+
+        page = st.radio("Navigate", pages, label_visibility="collapsed")
 
         st.divider()
         if st.button("Sign out", use_container_width=True):

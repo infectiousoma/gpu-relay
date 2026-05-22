@@ -449,7 +449,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     token, expires_in = create_access_token(user.id)
-    return TokenResponse(access_token=token, expires_in=expires_in)
+    return TokenResponse(access_token=token, expires_in=expires_in, role=user.role.value)
 
 
 @app.post("/auth/keys", response_model=ApiKeyResponse)

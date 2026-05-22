@@ -49,8 +49,9 @@ def render() -> None:
 
     st.divider()
 
-    # --- Provider balances ---
-    balances = get_provider_balances()
+    # --- Provider balances (admin only) ---
+    is_admin = st.session_state.get("user_role") == "admin"
+    balances = get_provider_balances() if is_admin else []
     if balances:
         st.subheader("Provider Balances")
         bcols = st.columns(len(balances))
