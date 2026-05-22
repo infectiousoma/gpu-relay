@@ -275,6 +275,34 @@ def get_requests_raw(
     ]
 
 
+def get_api_provider_stats(session: Session) -> list[dict]:
+    """Token usage + cost grouped by API provider for today and this month."""
+    q = text("""
+        SELECT
+            p.provider,
+            COUNT(r.id)                                    AS requests_today,
+            SUM(r.prompt_tokens + r.completion_tokens)     AS tokens_today,
+            SUM(r.cost_usd)::float                         AS cost_today,
+            SUM(SUM(r.cost_usd)) OVER (PARTITION BY p.provider)::float AS cost_month
+        FROM requests r
+        JOIN pods p ON p.id = r.pod_id
+        WHERE r.status = 'ok'
+          AND p.provider NOT IN ('runpod', 'vast', 'lambda', 'local', 'mock')
+          AND r.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
+        GROUP BY p.provider
+    """)
+    rows = session.execute(q).fetchall()
+    return [
+        {
+            "provider": r.provider,
+            "requests_today": int(r.requests_today),
+            "tokens_today": int(r.tokens_today or 0),
+            "cost_today": float(r.cost_today or 0),
+        }
+        for r in rows
+    ]
+
+
 def get_today_usage_by_tier(session: Session) -> list[dict]:
     q = text("""
         SELECT

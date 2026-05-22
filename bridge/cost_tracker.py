@@ -65,11 +65,14 @@ async def record_request(
 
     cost_usd = Decimal("0")
     if pod and not error_message:
-        concurrent = await _concurrent_users(pod.pod_id, idle_timeout_sec=_idle_timeout_for_tier(decision.tier), redis=redis)
-        idle_sec = _idle_timeout_for_tier(decision.tier)
-        latency_sec = latency_ms / 1000
-        charged_sec = latency_sec + (idle_sec / max(concurrent, 1))
-        cost_usd = Decimal(str((charged_sec / 3600) * pod.cost_per_hour_usd)).quantize(Decimal("0.000001"))
+        if pod.cost_per_hour_usd > 0:
+            concurrent = await _concurrent_users(pod.pod_id, idle_timeout_sec=_idle_timeout_for_tier(decision.tier), redis=redis)
+            idle_sec = _idle_timeout_for_tier(decision.tier)
+            latency_sec = latency_ms / 1000
+            charged_sec = latency_sec + (idle_sec / max(concurrent, 1))
+            cost_usd = Decimal(str((charged_sec / 3600) * pod.cost_per_hour_usd)).quantize(Decimal("0.000001"))
+        else:
+            cost_usd = _api_token_cost(pod.provider, pod.model, prompt_tokens, completion_tokens)
 
     request_id = str(uuid.uuid4())
     row = Request(
@@ -78,7 +81,7 @@ async def record_request(
         pod_id=pod.pod_id if pod else None,
         api_key_id=api_key_id,
         tier=decision.tier,
-        model=pod.tier if pod else decision.tier,
+        model=(pod.model or decision.tier) if pod else decision.tier,
         pipeline=pipeline,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
@@ -120,6 +123,21 @@ async def record_request(
         latency_ms=latency_ms,
         cost_usd=float(cost_usd),
     )
+
+
+def _api_token_cost(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> Decimal:
+    try:
+        import yaml
+        with open(settings.tiers_config_path) as f:
+            cfg = yaml.safe_load(f)
+        costs = cfg.get("api_token_costs", {}).get(provider, {}).get(model, {})
+        if not costs:
+            return Decimal("0")
+        input_cost = Decimal(str(costs["input_per_1k"])) * prompt_tokens / 1000
+        output_cost = Decimal(str(costs["output_per_1k"])) * completion_tokens / 1000
+        return (input_cost + output_cost).quantize(Decimal("0.000001"))
+    except Exception:
+        return Decimal("0")
 
 
 async def _concurrent_users(pod_id: str, idle_timeout_sec: int, redis: Redis) -> int:

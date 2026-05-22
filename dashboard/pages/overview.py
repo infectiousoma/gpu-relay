@@ -13,6 +13,7 @@ from dashboard.provider_balances import get_provider_balances
 from dashboard.db import (
     db_session,
     get_active_pods,
+    get_api_provider_stats,
     get_daily_costs,
     get_monthly_spend,
     get_tier_distribution,
@@ -32,6 +33,8 @@ def render() -> None:
         distribution = get_tier_distribution(session, days=30)
         active_pods = get_active_pods(session)
         today_tiers = get_today_usage_by_tier(session)
+        is_admin = st.session_state.get("user_role") == "admin"
+        api_stats = get_api_provider_stats(session) if is_admin else []
 
     # --- Top metrics row ---
     col1, col2, col3, col4 = st.columns(4)
@@ -49,23 +52,37 @@ def render() -> None:
 
     st.divider()
 
-    # --- Provider balances (admin only) ---
-    is_admin = st.session_state.get("user_role") == "admin"
-    balances = get_provider_balances() if is_admin else []
-    if balances:
-        st.subheader("Provider Balances")
-        bcols = st.columns(len(balances))
-        for col, b in zip(bcols, balances):
-            with col:
-                if b.get("error"):
-                    col.metric(b["provider"], "Error", delta=b["error"])
-                elif b.get("note"):
-                    col.metric(b["provider"], "—", delta=b["note"])
-                else:
-                    bal = b.get("balance")
-                    val = format_usd(bal) if bal is not None else "—"
-                    col.metric(b["provider"], val)
-        st.divider()
+    # --- Provider info (admin only) ---
+    if is_admin:
+        balances = get_provider_balances()
+        all_providers = balances + [
+            {
+                "provider": s["provider"].title(),
+                "_api_stat": s,
+            }
+            for s in api_stats
+        ]
+        if all_providers:
+            st.subheader("Providers")
+            pcols = st.columns(max(len(all_providers), 1))
+            for col, b in zip(pcols, all_providers):
+                with col:
+                    if "_api_stat" in b:
+                        s = b["_api_stat"]
+                        col.metric(
+                            s["provider"].title(),
+                            f"{s['tokens_today']:,} tok",
+                            delta=f"{format_usd(s['cost_today'])} today · {s['requests_today']} reqs",
+                        )
+                    elif b.get("error"):
+                        col.metric(b["provider"], "Error", delta=b["error"][:60])
+                    elif b.get("note"):
+                        col.metric(b["provider"], "—", delta=b["note"])
+                    else:
+                        bal = b.get("balance")
+                        val = format_usd(bal) if bal is not None else "—"
+                        col.metric(b["provider"], val, delta="credit balance")
+            st.divider()
 
     # --- Bridge health ---
     health = get_bridge_health()
