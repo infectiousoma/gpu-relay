@@ -20,7 +20,7 @@ def _runpod_balance() -> dict | None:
     try:
         r = httpx.post(
             f"https://api.runpod.io/graphql?api_key={api_key}",
-            json={"query": "query { myself { creditBalance } }"},
+            json={"query": "query { myself { clientBalance } }"},
             headers={"Content-Type": "application/json"},
             timeout=_TIMEOUT,
         )
@@ -33,7 +33,7 @@ def _runpod_balance() -> dict | None:
         data = resp.get("data", {}).get("myself", {})
         return {
             "provider": "RunPod",
-            "balance": data.get("creditBalance"),
+            "balance": data.get("clientBalance"),
             "currency": "USD",
         }
     except Exception as exc:
