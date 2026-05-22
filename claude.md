@@ -30,10 +30,12 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 |------|-------|-----|------|
 | simple | qwen2.5-coder:7b-instruct-q4_K_M | RTX 4090 | ~0.69 |
 | architecture | qwen2.5-coder:32b-instruct-q4_K_M | RTX 4090 | ~0.69 |
-| maximum | deepseek-v3:latest-q4_K_M | L40S | ~0.86 |
+| maximum | deepseek-v3:latest-q4_K_M | L40S | ~1.14 |
 | ultra | qwen2.5:72b-instruct-q4_K_M | A100 80GB | ~1.89 |
 
-Prices synced from live provider GPU catalog at startup.
+Pod provider prices synced from live RunPod GPU catalog at startup.
+
+**API provider costs** calculated per-token using rates in `config/tiers.yaml` → `api_token_costs` (USD per 1K tokens, separate input/output rates per model). Edit that block to update pricing — no code change needed. `Request.model` stores the actual model name (e.g. `gpt-4o-mini`) for API providers.
 
 ## Provider Types
 

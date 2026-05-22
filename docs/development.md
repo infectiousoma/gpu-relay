@@ -66,7 +66,9 @@ Streamlit app at http://localhost:8501. Pages:
 | Users | `dashboard/pages/users.py` | List, budget, allowed-tiers, suspend/activate, add user |
 | Billing | `dashboard/pages/billing.py` | Invoices, budget alerts |
 
-**Provider balances** (`dashboard/provider_balances.py`): fetches live credit from RunPod (GraphQL `creditBalance + currentSpend`) and Vast.ai (REST `/api/v0/users/current/`). Reads API keys from env — returns `None` for unconfigured providers, never raises. Lambda Labs balance API unavailable; shows configured note.
+**Provider balances** (`dashboard/provider_balances.py`): fetches live credit from RunPod (GraphQL `clientBalance`) and Vast.ai (REST `/api/v0/users/current/`). Reads API keys from env — returns `None` for unconfigured providers, never raises. Lambda Labs balance API unavailable.
+
+**API provider usage**: today's token count + cost per API provider queried from the `requests` table (joined to `pods` for provider name). Shown alongside credit balances on Overview.
 
 **Pod kill**: Dashboard writes directly to DB (`Pod.status = terminated`) rather than calling bridge admin API — avoids auth issues.
 

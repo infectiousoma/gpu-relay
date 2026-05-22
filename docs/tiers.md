@@ -22,7 +22,9 @@ Prices sync from live RunPod GPU catalog at startup. Budget gate uses projected 
 | `maximum` | gpt-4o | llama-3.3-70b | Llama-3.1-405B | mistral-large | deepseek-reasoner |
 | `ultra` | gpt-4o | llama-3.3-70b | Llama-3.1-405B | mistral-large | deepseek-reasoner |
 
-API providers have no hourly cost — budget gate is skipped when no pod providers are active. Override any model via env var (e.g. `OPENAI_MODEL_ARCHITECTURE=o1-mini`).
+API providers are billed per token (not per hour). Cost = `(prompt_tokens/1K × input_rate) + (completion_tokens/1K × output_rate)` using rates from `config/tiers.yaml` → `api_token_costs`. Update that section when a provider changes pricing — no code change needed.
+
+Override any model via env var (e.g. `OPENAI_MODEL_ARCHITECTURE=o1-mini`).
 
 ### Local GPU
 
