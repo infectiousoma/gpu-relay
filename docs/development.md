@@ -32,10 +32,11 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 **Key files:**
 - `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin
 - `bridge/router.py` — tier selection (tokens/files/keywords/budget)
+- `bridge/schemas.py` — request/response models; `ChatMessage.content` accepts `str | list[ContentPart]` for multimodal
 - `bridge/instance_manager.py` — pod pool, lifecycle, health, reaper
 - `bridge/multi_model.py` — pipeline (preprocess→infer→postprocess)
 - `bridge/settings.py` — all env vars via pydantic-settings
-- `providers/base.py` — BaseProvider ABC
+- `providers/base.py` — BaseProvider ABC; `_rank_gpu_offers()` returns all viable GPUs in preference order for fallback
 - `providers/runpod.py`, `vast.py`, `lambda_labs.py` — cloud GPU pod providers
 - `providers/local.py` — routes to local Ollama, no pod lifecycle
 - `providers/api_compat.py` — OpenAI/Groq/Together/Mistral/DeepSeek pass-through

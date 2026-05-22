@@ -25,6 +25,14 @@ PROVIDER_PRIORITY=runpod
 
 Pods launch on demand and terminate after `idle_timeout_sec` of inactivity. No cost while idle.
 
+**GPU fallback**: if the preferred GPU (e.g. RTX 4090) has no capacity at deploy time, the bridge automatically tries the next viable GPU type in preference order (`TIER_GPU_PREFERENCE` in `providers/base.py`) before failing. Returns 503 to the client only when all candidates are exhausted. Preference order for each tier:
+
+| Tier | GPU preference order |
+|------|----------------------|
+| `simple` / `architecture` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest ≥8 GB |
+| `maximum` | L40S → L40 → A40 → A100 40GB → cheapest ≥38 GB |
+| `ultra` | A100 80GB → H100 → cheapest ≥50 GB |
+
 Cold starts pull the Docker image + model on first use:
 - 7B model: ~3–5 min first run, ~30 s with network volume
 - 32B model: ~10–15 min first run, ~30 s with network volume
@@ -83,6 +91,8 @@ OPENAI_MODEL_ARCHITECTURE=o1-mini
 ```
 
 > **Note:** Anthropic (Claude) uses a different wire format and is not yet supported.
+
+**Multimodal (images)**: API providers that support vision (e.g. `openai` with `gpt-4o`, `together` with Llama vision models) accept `image_url` content parts in the OpenAI format. The bridge passes them through unchanged. Pod providers running standard Qwen/DeepSeek models do not support vision.
 
 ---
 

@@ -48,6 +48,12 @@ Pod provider prices synced from live RunPod GPU catalog at startup.
 
 `PROVIDER_PRIORITY` (comma list) controls order and which providers are active.
 
+**GPU fallback**: `_rank_gpu_offers(tier, offers)` in `providers/base.py` returns all viable GPU candidates sorted by `TIER_GPU_PREFERENCE` then price. RunPod's `launch()` iterates through them — if the preferred GPU has no capacity, it tries the next automatically. Returns 503 only when all candidates fail.
+
+## Multimodal
+
+`ChatMessage.content` accepts `str | list[ContentPart]` (OpenAI multimodal format). Use `msg.text_content()` anywhere plain text is needed (routing, token estimation, preprocessing). The raw `content` value passes through unchanged to upstream providers. Vision only works if the upstream model supports it (`gpt-4o`, llava, etc.).
+
 ## Pod Lifecycle (pod type only)
 
 1. `provider.launch(tier)` → `PodInfo` with endpoint_url
