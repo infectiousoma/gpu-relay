@@ -20,16 +20,19 @@ def _runpod_balance() -> dict | None:
     try:
         r = httpx.post(
             f"https://api.runpod.io/graphql?api_key={api_key}",
-            json={"query": "{ myself { creditBalance currentSpend } }"},
+            json={"query": "{ myself { creditBalance } }"},
             headers={"Content-Type": "application/json"},
             timeout=_TIMEOUT,
         )
         r.raise_for_status()
-        data = r.json().get("data", {}).get("myself", {})
+        resp = r.json()
+        errors = resp.get("errors")
+        if errors:
+            return {"provider": "RunPod", "balance": None, "error": errors[0].get("message", str(errors))}
+        data = resp.get("data", {}).get("myself", {})
         return {
             "provider": "RunPod",
             "balance": data.get("creditBalance"),
-            "spent_cycle": data.get("currentSpend"),
             "currency": "USD",
         }
     except Exception as exc:

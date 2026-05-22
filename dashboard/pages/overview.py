@@ -63,10 +63,8 @@ def render() -> None:
                     col.metric(b["provider"], "—", delta=b["note"])
                 else:
                     bal = b.get("balance")
-                    spent = b.get("spent_cycle")
                     val = format_usd(bal) if bal is not None else "—"
-                    delta = f"spent {format_usd(spent)}" if spent is not None else None
-                    col.metric(b["provider"], val, delta=delta)
+                    col.metric(b["provider"], val)
         st.divider()
 
     # --- Bridge health ---
