@@ -198,7 +198,7 @@ async def chat_completions(
     manager: InstanceManager = request.app.state.manager
 
     # --- Quota checks ---
-    prompt_tokens_est = max(1, sum(len(m.content) for m in body.messages if m.content) // 4)
+    prompt_tokens_est = max(1, sum(len(m.text_content()) for m in body.messages) // 4)
     await check_rpm(user.id, redis)
     await check_daily_tokens(user.id, prompt_tokens_est, redis)
 
@@ -375,7 +375,7 @@ async def _stream_response(
     async def event_generator():
         start_ms = int(time.time() * 1000)
         manager.mark_active(pod.pod_id)
-        prompt_tokens = max(1, sum(len(m.content) for m in body.messages if m.content) // 4)
+        prompt_tokens = max(1, sum(len(m.text_content()) for m in body.messages) // 4)
         completion_tokens = 0
         error_message = None
         try:

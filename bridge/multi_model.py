@@ -194,8 +194,8 @@ class WorkflowOrchestrator:
         """
         meta: dict = {"workflow": workflow, "stages": [], "errors": []}
         user_content = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"), ""
-        ) or ""
+            (m.text_content() for m in reversed(request.messages) if m.role == "user"), ""
+        )
 
         handlers = {
             "optimize_and_execute": self._optimize_and_execute,
@@ -243,7 +243,7 @@ class WorkflowOrchestrator:
         return r.json().get("message", {}).get("content", "")
 
     def _prior_messages(self, request: ChatCompletionRequest) -> list[dict]:
-        return [{"role": m.role, "content": m.content} for m in request.messages[:-1]]
+        return [{"role": m.role, "content": m.text_content()} for m in request.messages[:-1]]
 
     # ------------------------------------------------------------------
     # Workflow: optimize_and_execute (llm-smart)
@@ -607,7 +607,7 @@ async def run_postprocess(
 async def _run_preprocessor(request: ChatCompletionRequest) -> dict:
     """Call local Ollama; return parsed JSON preprocessor output."""
     last_user = next(
-        (m.content for m in reversed(request.messages) if m.role == "user"), ""
+        (m.text_content() for m in reversed(request.messages) if m.role == "user"), ""
     )
 
     payload = {

@@ -104,14 +104,14 @@ def _projected_cost(tier_name: str, prompt_tokens: int) -> float:
 
 def _prompt_tokens(request: ChatCompletionRequest) -> int:
     # Rough estimate: 4 chars ≈ 1 token across all messages
-    total_chars = sum(len(m.content) for m in request.messages if m.content)
+    total_chars = sum(len(m.text_content()) for m in request.messages)
     return max(1, total_chars // 4)
 
 
 def _last_user_text(request: ChatCompletionRequest) -> str:
     for msg in reversed(request.messages):
         if msg.role == "user":
-            return msg.content or ""
+            return msg.text_content()
     return ""
 
 

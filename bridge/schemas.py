@@ -13,12 +13,25 @@ from pydantic import BaseModel, Field
 
 Role = Literal["system", "user", "assistant", "tool"]
 
+# OpenAI multimodal content part (text or image_url)
+ContentPart = dict[str, Any]
+# content can be a plain string or a list of content parts (multimodal)
+MessageContent = str | list[ContentPart]
+
 
 class ChatMessage(BaseModel):
     role: Role
-    content: str
+    content: MessageContent
     name: str | None = None
     tool_call_id: str | None = None
+
+    def text_content(self) -> str:
+        """Flatten content to plain text for routing/preprocessing/token estimation."""
+        if isinstance(self.content, str):
+            return self.content
+        return " ".join(
+            p.get("text", "") for p in self.content if p.get("type") == "text"
+        )
 
 
 class ChatCompletionRequest(BaseModel):
