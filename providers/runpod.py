@@ -95,18 +95,12 @@ class RunPodProvider(BaseProvider):
     # Public API
     # ------------------------------------------------------------------
 
-    @retry(
-        retry=retry_if_exception(_is_retryable),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=2, max=30),
-        reraise=True,
-    )
     async def launch(self, tier: str) -> PodInfo:
         if not self._api_key:
             raise ProviderError("RUNPOD_API_KEY not set", retryable=False)
 
         offers = await self.list_gpus()
-        offer = self._select_gpu_offer(tier, offers)
+        candidates = self._rank_gpu_offers(tier, offers)
         model = TIER_MODEL[tier]
 
         mutation = """
@@ -128,49 +122,56 @@ class RunPodProvider(BaseProvider):
         if volume_id:
             env.append({"key": "OLLAMA_MODELS", "value": "/runpod-volume/ollama"})
 
-        inp: dict = {
-            "cloudType": "SECURE",
-            "gpuCount": 1,
-            "gpuTypeId": offer.gpu_type_id,
-            "containerDiskInGb": 20,
-            "volumeInGb": 50 if volume_id else 0,
-            "minVcpuCount": 2,
-            "minMemoryInGb": 16,
-            "imageName": "ollama/ollama:latest",
-            # ollama/ollama uses ENTRYPOINT ["/bin/ollama"] CMD ["serve"] —
-            # no dockerArgs override; model is pulled after readiness via API.
-            "env": env,
-            "ports": "11434/http",
-            "name": f"llm-{tier}",
-            "supportPublicIp": True,
-        }
-        if volume_id:
-            inp["networkVolumeId"] = volume_id
-            inp["volumeMountPath"] = "/runpod-volume"
+        last_error: Exception | None = None
+        for offer in candidates:
+            inp: dict = {
+                "cloudType": "SECURE",
+                "gpuCount": 1,
+                "gpuTypeId": offer.gpu_type_id,
+                "containerDiskInGb": 20,
+                "volumeInGb": 50 if volume_id else 0,
+                "minVcpuCount": 2,
+                "minMemoryInGb": 16,
+                "imageName": "ollama/ollama:latest",
+                "env": env,
+                "ports": "11434/http",
+                "name": f"llm-{tier}",
+                "supportPublicIp": True,
+            }
+            if volume_id:
+                inp["networkVolumeId"] = volume_id
+                inp["volumeMountPath"] = "/runpod-volume"
 
-        variables = {"input": inp}
+            try:
+                data = await self._gql(mutation, {"input": inp})
+                pod_data = data.get("podFindAndDeployOnDemand")
+                if not pod_data:
+                    raise ProviderError("RunPod returned empty pod response", retryable=True)
+            except ProviderError as exc:
+                if "no longer any instances available" in str(exc).lower() or "no instances available" in str(exc).lower():
+                    log.warning("runpod_gpu_no_capacity", gpu=offer.gpu, tier=tier)
+                    last_error = exc
+                    continue
+                raise
 
-        data = await self._gql(mutation, variables)
-        pod_data = data.get("podFindAndDeployOnDemand")
-        if not pod_data:
-            raise ProviderError("RunPod returned empty pod response", retryable=True)
+            external_id = pod_data["id"]
+            cost = float(pod_data.get("machine", {}).get("costPerHr", offer.cost_per_hour_usd))
+            log.info("runpod_pod_launched", external_id=external_id, tier=tier, gpu=offer.gpu)
 
-        external_id = pod_data["id"]
-        cost = float(pod_data.get("machine", {}).get("costPerHr", offer.cost_per_hour_usd))
+            endpoint_url = await self._wait_for_endpoint(external_id)
+            return PodInfo(
+                external_id=external_id,
+                provider=self.name,
+                gpu=offer.gpu,
+                model=model,
+                cost_per_hour_usd=cost,
+                status="starting",
+                endpoint_url=endpoint_url,
+            )
 
-        log.info("runpod_pod_launched", external_id=external_id, tier=tier, gpu=offer.gpu)
-
-        # Poll until RUNNING and proxy URL available
-        endpoint_url = await self._wait_for_endpoint(external_id)
-
-        return PodInfo(
-            external_id=external_id,
-            provider=self.name,
-            gpu=offer.gpu,
-            model=model,
-            cost_per_hour_usd=cost,
-            status="starting",
-            endpoint_url=endpoint_url,
+        raise ProviderError(
+            f"RunPod: no capacity across {len(candidates)} GPU type(s) for tier '{tier}': {last_error}",
+            retryable=True,
         )
 
     async def terminate(self, external_id: str) -> None:

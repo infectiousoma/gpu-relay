@@ -145,7 +145,12 @@ class BaseProvider(ABC):
     # ------------------------------------------------------------------
 
     def _select_gpu_offer(self, tier: str, offers: list[GpuOffer]) -> GpuOffer:
-        """Pick cheapest available offer matching tier VRAM + GPU preferences."""
+        """Pick best available offer for tier. Prefer first ranked candidate."""
+        ranked = self._rank_gpu_offers(tier, offers)
+        return ranked[0]
+
+    def _rank_gpu_offers(self, tier: str, offers: list[GpuOffer]) -> list[GpuOffer]:
+        """Return all viable offers in preference order (preferred GPUs first, then by price)."""
         min_vram = TIER_VRAM_REQUIRED.get(tier, 8)
         prefs = TIER_GPU_PREFERENCE.get(tier, [])
 
@@ -156,12 +161,11 @@ class BaseProvider(ABC):
                 retryable=True,
             )
 
-        # Try preference order first
-        for pref in prefs:
-            pref_lower = pref.lower()
-            match = next((o for o in candidates if pref_lower in o.gpu.lower()), None)
-            if match:
-                return match
+        def _rank(offer: GpuOffer) -> tuple:
+            gpu_lower = offer.gpu.lower()
+            for i, pref in enumerate(prefs):
+                if pref.lower() in gpu_lower:
+                    return (i, offer.cost_per_hour_usd)
+            return (len(prefs), offer.cost_per_hour_usd)
 
-        # Fall back to cheapest candidate
-        return min(candidates, key=lambda o: o.cost_per_hour_usd)
+        return sorted(candidates, key=_rank)

@@ -242,7 +242,14 @@ async def chat_completions(
         body, pipeline_meta = await run_pipeline(body, pipeline)
 
     # --- Acquire pod ---
-    pod = await manager.acquire(decision.tier)
+    try:
+        pod = await manager.acquire(decision.tier)
+    except Exception as exc:
+        log.error("acquire_failed", tier=decision.tier, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No capacity available for tier '{decision.tier}': {exc}",
+        )
 
     # Track user on pod (for concurrent-user cost calc)
     await redis.sadd(f"pod_users:{pod.pod_id}", user.id)
