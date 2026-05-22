@@ -54,6 +54,29 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 - `"local"` — wait + pull; terminate is no-op
 - `"api"` — skip all lifecycle; inject `extra_request_headers()` per request
 
+## Dashboard
+
+Streamlit app at http://localhost:8501. Pages:
+
+| Page | Path | Description |
+|------|------|-------------|
+| Overview | `dashboard/pages/overview.py` | Month spend, active pods, cost charts, provider balances |
+| Monitoring | `dashboard/pages/monitoring.py` | Live pods, in-flight requests, hourly cost ticker, pod kill |
+| Analytics | `dashboard/pages/analytics.py` | Daily cost by tier, token heatmap, latency percentiles |
+| Users | `dashboard/pages/users.py` | List, budget, allowed-tiers, suspend/activate, add user |
+| Billing | `dashboard/pages/billing.py` | Invoices, budget alerts |
+
+**Provider balances** (`dashboard/provider_balances.py`): fetches live credit from RunPod (GraphQL `creditBalance + currentSpend`) and Vast.ai (REST `/api/v0/users/current/`). Reads API keys from env — returns `None` for unconfigured providers, never raises. Lambda Labs balance API unavailable; shows configured note.
+
+**Pod kill**: Dashboard writes directly to DB (`Pod.status = terminated`) rather than calling bridge admin API — avoids auth issues.
+
+Key dashboard files:
+- `dashboard/app.py` — entry point, page registry
+- `dashboard/db.py` — sync SQLAlchemy queries (psycopg3, not asyncpg)
+- `dashboard/api_client.py` — bridge health/stats via HTTP
+- `dashboard/provider_balances.py` — provider credit balance queries
+- `dashboard/components/` — shared metrics formatters and Plotly charts
+
 ## DB Schema
 
 Tables: `users`, `api_keys`, `pods`, `requests`, `invoices`, `audit_log`

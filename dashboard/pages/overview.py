@@ -9,6 +9,7 @@ import streamlit as st
 from dashboard.api_client import get_bridge_health
 from dashboard.components.charts import cost_trend_chart, tier_pie_chart, usage_hours_bar
 from dashboard.components.metrics import budget_progress, format_usd, format_tokens, tier_badge
+from dashboard.provider_balances import get_provider_balances
 from dashboard.db import (
     db_session,
     get_active_pods,
@@ -47,6 +48,25 @@ def render() -> None:
         st.metric("Today's Requests", f"{today_reqs:,}")
 
     st.divider()
+
+    # --- Provider balances ---
+    balances = get_provider_balances()
+    if balances:
+        st.subheader("Provider Balances")
+        bcols = st.columns(len(balances))
+        for col, b in zip(bcols, balances):
+            with col:
+                if b.get("error"):
+                    col.metric(b["provider"], "Error", delta=b["error"])
+                elif b.get("note"):
+                    col.metric(b["provider"], "—", delta=b["note"])
+                else:
+                    bal = b.get("balance")
+                    spent = b.get("spent_cycle")
+                    val = format_usd(bal) if bal is not None else "—"
+                    delta = f"spent {format_usd(spent)}" if spent is not None else None
+                    col.metric(b["provider"], val, delta=delta)
+        st.divider()
 
     # --- Bridge health ---
     health = get_bridge_health()

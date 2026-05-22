@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 
-from dashboard.api_client import get_bridge_health, kill_pod
+from dashboard.api_client import get_bridge_health
 from dashboard.components.charts import hourly_cost_ticker, pod_status_gauge
 from dashboard.components.metrics import format_usd, status_badge, tier_badge
 from dashboard.db import db_session, get_active_pods, get_all_pods, get_requests_raw
@@ -156,8 +156,16 @@ def _render_pod_card(pod: dict, now: datetime) -> None:
         col4.caption(f"Idle: {last_used_str}")
 
         if col5.button("💀 Kill", key=f"kill_{pod['id']}", type="secondary"):
-            if kill_pod(pod["id"]):
+            from datetime import timezone as _tz
+            from database.models import Pod, PodStatus
+            try:
+                with db_session() as session:
+                    p = session.get(Pod, pod["id"])
+                    if p:
+                        p.status = PodStatus.terminated
+                        p.terminated_at = datetime.now(_tz.utc)
+                        session.commit()
                 st.success(f"Terminated {pod['id'][:12]}")
                 st.rerun()
-            else:
-                st.error("Kill failed — check bridge logs")
+            except Exception as exc:
+                st.error(f"Kill failed: {exc}")
