@@ -13,16 +13,18 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 ```
 
 **Key files:**
-- `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin
-- `bridge/router.py` — tier selection (tokens/files/keywords/budget)
+- `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin; `_resolve_image_urls()` fetches external image URLs → base64 data URIs before forwarding to Ollama
+- `bridge/router.py` — tier selection (vision routing at step 0, tokens/files/keywords/budget); vision helpers `has_image_content()`, `model_supports_vision()`, `strip_images_from_messages()`, `get_tiers()`
+- `bridge/schemas.py` — request/response models; `ChatMessage.content` accepts `str | list[ContentPart]` for multimodal
 - `bridge/instance_manager.py` — pod pool, lifecycle, health, reaper
-- `bridge/multi_model.py` — pipeline (preprocess→infer→postprocess), WorkflowOrchestrator; `llm-visual-html` workflow does vision-describe → local HTML generation with base64 image injection
+- `bridge/multi_model.py` — WorkflowOrchestrator; pipeline (preprocess→infer→postprocess) + named workflows (`llm-visual-html`: vision-describe → local HTML generation with base64 image injection)
 - `bridge/settings.py` — all env vars via pydantic-settings
 - `providers/base.py` — BaseProvider ABC; `provider_type`: `"pod"/"local"/"api"`
 - `providers/runpod.py`, `vast.py`, `lambda_labs.py` — cloud GPU pod providers
 - `providers/local.py` — routes to local Ollama, no pod lifecycle
 - `providers/api_compat.py` — OpenAI/Groq/Together/Mistral/DeepSeek pass-through
 - `database/models.py` — User, Pod, Request, ApiKey, Invoice
+- `cli/llm_ctl.py` — admin CLI; run via `scripts/llmctl` wrapper (docker compose exec bridge python -m cli.llm_ctl)
 
 ## Tiers
 

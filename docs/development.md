@@ -30,17 +30,31 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 ```
 
 **Key files:**
-- `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin
-- `bridge/router.py` — tier selection (vision routing, tokens/files/keywords/budget); vision helpers (`has_image_content`, `model_supports_vision`, `strip_images_from_messages`)
+- `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin; `_resolve_image_urls()` fetches external image URLs → base64 data URIs before forwarding to Ollama
+- `bridge/router.py` — tier selection (vision routing at step 0, tokens/files/keywords/budget); vision helpers (`has_image_content`, `model_supports_vision`, `strip_images_from_messages`, `get_tiers`)
 - `bridge/schemas.py` — request/response models; `ChatMessage.content` accepts `str | list[ContentPart]` for multimodal
 - `bridge/instance_manager.py` — pod pool, lifecycle, health, reaper
-- `bridge/multi_model.py` — pipeline (preprocess→infer→postprocess)
+- `bridge/multi_model.py` — WorkflowOrchestrator; pipeline (preprocess→infer→postprocess) + named workflows (`llm-visual-html` etc.)
 - `bridge/settings.py` — all env vars via pydantic-settings
 - `providers/base.py` — BaseProvider ABC; `_rank_gpu_offers()` returns all viable GPUs in preference order for fallback
 - `providers/runpod.py`, `vast.py`, `lambda_labs.py` — cloud GPU pod providers
 - `providers/local.py` — routes to local Ollama, no pod lifecycle
 - `providers/api_compat.py` — OpenAI/Groq/Together/Mistral/DeepSeek pass-through
 - `database/models.py` — User, Pod, Request, ApiKey, Invoice
+- `cli/llm_ctl.py` — admin CLI (users, budget, tiers, keys)
+
+## Admin CLI
+
+`scripts/llmctl` wraps `cli/llm_ctl.py` via docker compose:
+
+```bash
+./scripts/llmctl users list
+./scripts/llmctl users tiers user@example.com --set simple,vision
+./scripts/llmctl users budget user@example.com --usd 10
+./scripts/llmctl keys create user@example.com
+```
+
+Dashboard's allowed-tiers multiselect loads available tiers dynamically from `get_tiers()` — adding a new tier to `config/tiers.yaml` is enough; no code change needed.
 
 ## Pod Lifecycle
 

@@ -82,7 +82,11 @@ def _render_user_detail(u: dict) -> None:
         st.markdown("**Edit**")
         fcol1, fcol2, fcol3 = st.columns(3)
 
-        _all_tiers = ["simple", "architecture", "maximum", "ultra"]
+        try:
+            from bridge.router import get_tiers
+            _all_tiers = list(get_tiers().keys())
+        except Exception:
+            _all_tiers = ["simple", "architecture", "maximum", "ultra", "vision"]
         new_budget = fcol1.number_input(
             "Budget USD/month", value=u["monthly_budget_usd"], min_value=0.0, step=5.0, key=f"budget_{u['id']}"
         )
