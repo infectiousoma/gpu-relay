@@ -31,7 +31,7 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 
 **Key files:**
 - `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin
-- `bridge/router.py` — tier selection (tokens/files/keywords/budget)
+- `bridge/router.py` — tier selection (vision routing, tokens/files/keywords/budget); vision helpers (`has_image_content`, `model_supports_vision`, `strip_images_from_messages`)
 - `bridge/schemas.py` — request/response models; `ChatMessage.content` accepts `str | list[ContentPart]` for multimodal
 - `bridge/instance_manager.py` — pod pool, lifecycle, health, reaper
 - `bridge/multi_model.py` — pipeline (preprocess→infer→postprocess)

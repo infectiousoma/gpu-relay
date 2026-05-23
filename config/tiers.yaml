@@ -4,6 +4,29 @@
 #   API and local providers have no hourly cost — budget gate skips projection for them.
 
 tiers:
+  vision:
+    gpu: RTX_4090
+    model: llava:7b
+    vram_gb: 10
+    cost_per_hour_usd: 0.69
+    idle_timeout_sec: 300
+    # strip_images: strip image parts and continue with the fallback tier on pod failure
+    # error: return 400 with vision_not_supported if no vision pod is available
+    fallback: strip_images
+    max_context_tokens: 4096
+    use_cases:
+      - image analysis
+      - visual question answering
+      - multimodal chat
+    routing_signals:
+      max_prompt_tokens: 8000
+      max_files: 3
+    provider_models:
+      local: "llava:7b"
+      # TODO: set RUNPOD_TEMPLATE_ID for llava image; update TIER_MODEL["vision"] in
+      #       providers/base.py to "llava:34b" for RunPod once template is created.
+      runpod: "llava:34b"
+
   simple:
     gpu: RTX_4090
     model: qwen2.5-coder:7b-instruct-q4_K_M

@@ -32,6 +32,7 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 | architecture | qwen2.5-coder:32b-instruct-q4_K_M | RTX 4090 | ~0.69 |
 | maximum | deepseek-v3:latest-q4_K_M | L40S | ~1.14 |
 | ultra | qwen2.5:72b-instruct-q4_K_M | A100 80GB | ~1.89 |
+| vision | llava:7b (RunPod: llava:34b) | RTX 4090 | ~0.69 |
 
 Pod provider prices synced from live RunPod GPU catalog at startup.
 
@@ -50,9 +51,15 @@ Pod provider prices synced from live RunPod GPU catalog at startup.
 
 **GPU fallback**: `_rank_gpu_offers(tier, offers)` in `providers/base.py` returns all viable GPU candidates sorted by `TIER_GPU_PREFERENCE` then price. RunPod's `launch()` iterates through them — if the preferred GPU has no capacity, it tries the next automatically. Returns 503 only when all candidates fail.
 
-## Multimodal
+## Multimodal / Vision
 
-`ChatMessage.content` accepts `str | list[ContentPart]` (OpenAI multimodal format). Use `msg.text_content()` anywhere plain text is needed (routing, token estimation, preprocessing). The raw `content` value passes through unchanged to upstream providers. Vision only works if the upstream model supports it (`gpt-4o`, llava, etc.).
+`ChatMessage.content` accepts `str | list[ContentPart]` (OpenAI multimodal format). Use `msg.text_content()` anywhere plain text is needed (routing, token estimation, preprocessing).
+
+**Vision routing** (`bridge/router.py` step 0): requests containing `image_url` content parts are automatically routed to the `vision` tier (llava) before all other routing signals, unless the requested model already supports vision (gpt-4o, llava, gemini, etc.). If the vision pod is unavailable, behavior is controlled by `config/tiers.yaml` → `vision.fallback`:
+- `strip_images` (default) — strips image parts, continues with text only on the normal tier
+- `error` — returns HTTP 400 `vision_not_supported`
+
+Three helpers in `bridge/router.py`: `has_image_content()`, `model_supports_vision()`, `strip_images_from_messages()`.
 
 ## Pod Lifecycle (pod type only)
 
@@ -76,6 +83,7 @@ Preprocessing rewrites user prompt via local Ollama 7B → structured JSON befor
 
 ## Routing (priority order)
 
+0. Image content detected + model doesn't support vision → `vision` tier
 1. `X-Tier` header / `?tier=` param
 2. Per-user `allowed_tiers` whitelist
 3. Budget gate (downgrade or 402)

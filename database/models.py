@@ -79,6 +79,7 @@ class TierName(str, enum.Enum):
     architecture = "architecture"
     maximum = "maximum"
     ultra = "ultra"
+    vision = "vision"
 
 
 class InvoiceStatus(str, enum.Enum):

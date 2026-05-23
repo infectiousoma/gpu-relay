@@ -74,6 +74,7 @@ TIER_VRAM_REQUIRED: dict[str, int] = {
     "architecture": 20,   # 32B q4 ≈ 18 GB
     "maximum": 38,        # deepseek-v3 q4 ≈ 36 GB
     "ultra": 50,          # 72B q4 ≈ 48 GB
+    "vision": 10,         # llava:7b q4 ≈ 5 GB; 10 GB floor for vision encoder headroom
 }
 
 # Tier → preferred GPU type names (matched against provider GPU names,
@@ -83,14 +84,18 @@ TIER_GPU_PREFERENCE: dict[str, list[str]] = {
     "architecture": ["4090", "3090", "a40", "a6000"],
     "maximum":      ["l40s", "l40", "a40", "a100 40", "a100-40"],
     "ultra":        ["a100 80", "a100-80", "a100 sxm4 80", "h100"],
+    "vision":       ["4090", "3090", "a40", "a6000"],
 }
 
 # Ollama model tag per tier
+# TODO (vision/RunPod): change TIER_MODEL["vision"] to "llava:34b" once a RunPod
+#      template with the llava:34b image is created and RUNPOD_TEMPLATE_ID is set.
 TIER_MODEL: dict[str, str] = {
     "simple":       "qwen2.5-coder:7b-instruct-q4_K_M",
     "architecture": "qwen2.5-coder:32b-instruct-q4_K_M",
     "maximum":      "deepseek-v3:latest-q4_K_M",
     "ultra":        "qwen2.5:72b-instruct-q4_K_M",
+    "vision":       "llava:7b",
 }
 
 OLLAMA_PORT = 11434

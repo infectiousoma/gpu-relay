@@ -45,7 +45,7 @@ from bridge.cost_tracker import estimate_cost, record_request
 from bridge.instance_manager import InstanceManager, get_manager
 from bridge.multi_model import WORKFLOW_MODELS, WorkflowOrchestrator, run_pipeline, run_postprocess
 from bridge.quota import check_daily_tokens, check_monthly_budget, check_rpm
-from bridge.router import select_tier
+from bridge.router import get_tiers, has_image_content, model_supports_vision, select_tier, strip_images_from_messages
 from bridge.schemas import (
     ApiKeyResponse,
     BridgeMeta,
@@ -247,14 +247,46 @@ async def chat_completions(
         pod = await manager.acquire(decision.tier)
     except Exception as exc:
         log.error("acquire_failed", tier=decision.tier, error=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"No capacity available for tier '{decision.tier}': {exc}",
-        )
+        if decision.tier == "vision":
+            fallback = get_tiers().get("vision", {}).get("fallback", "error")
+            if fallback == "strip_images":
+                log.warning("vision_pod_unavailable_stripping_images", error=str(exc))
+                body.messages = strip_images_from_messages(body.messages)
+                decision = await select_tier(body, user, request, monthly_spent)
+                try:
+                    pod = await manager.acquire(decision.tier)
+                except Exception as exc2:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"No capacity available for tier '{decision.tier}': {exc2}",
+                    )
+            else:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": {
+                            "message": "No vision-capable model is available and fallback is disabled.",
+                            "type": "invalid_request_error",
+                            "code": "vision_not_supported",
+                        }
+                    },
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"No capacity available for tier '{decision.tier}': {exc}",
+            )
 
     # Track user on pod (for concurrent-user cost calc)
     await redis.sadd(f"pod_users:{pod.pod_id}", user.id)
     await redis.expire(f"pod_users:{pod.pod_id}", 3600)
+
+    # Strip image_url parts when the selected model doesn't support vision
+    if not workflow_def:
+        selected_model = pod.model or body.model
+        if has_image_content(body.messages) and not model_supports_vision(selected_model):
+            log.warning("stripping_images_unsupported_model", model=selected_model)
+            body.messages = strip_images_from_messages(body.messages)
 
     idempotency_key = request.headers.get("x-idempotency-key")
     api_key_id = getattr(request.state, "api_key_id", None)

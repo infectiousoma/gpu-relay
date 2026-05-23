@@ -10,6 +10,9 @@
 | `architecture` | Qwen2.5-Coder 32B | RTX 4090 | ~$0.69 |
 | `maximum` | DeepSeek V3 | L40S 48GB | ~$1.14 |
 | `ultra` | Qwen2.5 72B | A100 80GB | ~$1.89 |
+| `vision` | LLaVA 7B (RunPod: LLaVA 34B†) | RTX 4090 | ~$0.69 |
+
+† `TIER_MODEL["vision"]` in `providers/base.py` defaults to `llava:7b`. Change to `llava:34b` for RunPod once a pod template with that image is set up.
 
 Prices sync from live RunPod GPU catalog at startup. Budget gate uses projected hourly cost.
 
@@ -37,6 +40,7 @@ Same Ollama models as pod providers. Zero cost — budget gate skipped.
 - `llm-architecture`
 - `llm-maximum`
 - `llm-ultra`
+- `llm-vision` — LLaVA vision model; selected automatically for image requests
 - `llm-auto` — router picks based on request complexity
 
 **Workflow models** (multi-step orchestration):
@@ -49,6 +53,7 @@ Same Ollama models as pod providers. Zero cost — budget gate skipped.
 
 When using `llm-auto`, the router picks a tier based on (priority order):
 
+0. Image content (`image_url` parts) + non-vision model → `vision` tier
 1. `X-Tier` header / `?tier=` query param
 2. Per-user `allowed_tiers` whitelist
 3. Budget gate (downgrade or 402)
@@ -56,6 +61,8 @@ When using `llm-auto`, the router picks a tier based on (priority order):
 5. File count thresholds
 6. Complexity keywords
 7. Default: `simple`
+
+**Vision fallback** when no vision pod is available: controlled by `config/tiers.yaml` → `vision.fallback`. Default `strip_images` drops image parts and continues on the text tier. Set to `error` to return HTTP 400 instead.
 
 ## Tier Locking
 

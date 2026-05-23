@@ -163,6 +163,16 @@ async def select_tier(
     files = request.files_referenced or 0
     allowed = _allowed_tiers(user)
 
+    # 0. Vision routing — image content always routes to vision tier before other signals
+    if has_image_content(request.messages) and not model_supports_vision(model_field):
+        vision_cfg = _TIERS.get("vision")
+        if vision_cfg and (not allowed or "vision" in allowed):
+            cost = _projected_cost("vision", prompt_tokens)
+            log.info("tier_vision_routing", original_model=model_field)
+            return RoutingDecision(tier="vision", reason="vision_content_detected", projected_cost_usd=cost)
+        # Vision tier not configured or user lacks access — fall through to normal routing;
+        # main.py strips images on pod acquisition failure per the vision tier's fallback setting.
+
     # 1. Explicit override
     override = (
         http_request.headers.get("x-tier")
@@ -245,3 +255,54 @@ async def select_tier(
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         detail=f"Insufficient budget (${float(remaining):.4f} remaining)",
     )
+
+
+def get_tiers() -> dict:
+    """Return the cached tier config dict (loaded from tiers.yaml at startup)."""
+    return _TIERS
+
+
+# ---------------------------------------------------------------------------
+# Vision helpers
+# ---------------------------------------------------------------------------
+
+_VISION_MODELS = {"llava", "bakllava", "moondream", "llava-llama3", "minicpm-v",
+                  "gpt-4o", "gpt-4-vision", "claude-3", "gemini"}
+
+
+def has_image_content(messages: list) -> bool:
+    for msg in messages:
+        content = msg.content if hasattr(msg, "content") else msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                part_type = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+                if part_type == "image_url":
+                    return True
+    return False
+
+
+def model_supports_vision(model_name: str) -> bool:
+    return any(v in model_name.lower() for v in _VISION_MODELS)
+
+
+def strip_images_from_messages(messages: list) -> list:
+    cleaned = []
+    for msg in messages:
+        content = msg.content if hasattr(msg, "content") else msg.get("content")
+        if isinstance(content, list):
+            text_parts = [
+                p for p in content
+                if (p.get("type") if isinstance(p, dict) else getattr(p, "type", None)) == "text"
+            ]
+            text = " ".join(
+                p.get("text", "") if isinstance(p, dict) else getattr(p, "text", "")
+                for p in text_parts
+            ).strip()
+            replacement = text or "[image removed — model does not support vision]"
+            if hasattr(msg, "content"):
+                msg.content = replacement
+            else:
+                msg = dict(msg)
+                msg["content"] = replacement
+        cleaned.append(msg)
+    return cleaned

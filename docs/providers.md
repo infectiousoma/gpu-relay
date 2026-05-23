@@ -29,7 +29,7 @@ Pods launch on demand and terminate after `idle_timeout_sec` of inactivity. No c
 
 | Tier | GPU preference order |
 |------|----------------------|
-| `simple` / `architecture` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest ≥8 GB |
+| `simple` / `architecture` / `vision` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest ≥8 GB |
 | `maximum` | L40S → L40 → A40 → A100 40GB → cheapest ≥38 GB |
 | `ultra` | A100 80GB → H100 → cheapest ≥50 GB |
 
@@ -92,7 +92,7 @@ OPENAI_MODEL_ARCHITECTURE=o1-mini
 
 > **Note:** Anthropic (Claude) uses a different wire format and is not yet supported.
 
-**Multimodal (images)**: API providers that support vision (e.g. `openai` with `gpt-4o`, `together` with Llama vision models) accept `image_url` content parts in the OpenAI format. The bridge passes them through unchanged. Pod providers running standard Qwen/DeepSeek models do not support vision.
+**Multimodal (images)**: Requests containing `image_url` content parts are automatically routed to the `vision` tier (LLaVA) before any other routing logic. If the requested model already supports vision (`gpt-4o`, `llava`, `gemini`, etc.) the request passes through unchanged. If no vision pod is available, behavior depends on `config/tiers.yaml` → `vision.fallback` (`strip_images` or `error`). See [tiers.md](tiers.md#auto-routing-logic) for details.
 
 ---
 
