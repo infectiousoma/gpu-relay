@@ -65,7 +65,7 @@ curl ... -d '{"model":"llm-auto","messages":[...]}'
 curl -H "X-Tier: simple" ...
 ```
 
-Available models: `llm-simple`, `llm-architecture`, `llm-maximum`, `llm-ultra`, `llm-auto`
+Available models: `llm-simple`, `llm-architecture`, `llm-maximum`, `llm-ultra`, `llm-vision`, `llm-auto`
 
 See [Tiers & Models](docs/tiers.md) for full details and tier locking options.
 

@@ -86,6 +86,20 @@ Tables: `users`, `api_keys`, `pods`, `requests`, `invoices`, `audit_log`
 
 API keys: SHA-256 hashed, plaintext shown once at issuance. Passwords: bcrypt.
 
+### Migrations
+
+```bash
+docker compose run --rm bridge alembic upgrade head
+```
+
+Run after pulling commits that add migrations (check `database/migrations/versions/`). Current migrations:
+
+| Revision | Change |
+|----------|--------|
+| `0001_initial_schema` | Full schema — users, pods, requests, invoices, audit_log |
+| `0002_user_allowed_tiers` | Add `allowed_tiers` JSON column to users |
+| `0003_vision_tier` | Add `'vision'` value to `tier_name` PostgreSQL enum |
+
 ## Environment Variables
 
 See `.env.example` for the full list with comments. Key vars:
