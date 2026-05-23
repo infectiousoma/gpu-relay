@@ -16,6 +16,7 @@ GET  /admin/users                  — list users (admin)
 
 from __future__ import annotations
 
+import base64
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -319,7 +320,8 @@ async def chat_completions(
             completion_tokens = max(1, len(completion_text) // 4)
         else:
             # --- Standard non-streaming ---
-            payload = _build_inference_payload(body, stream=False, model=pod.model or None)
+            resolved = await _resolve_image_urls(body.messages) if pod.provider in _OLLAMA_PROVIDERS and has_image_content(body.messages) else None
+            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved)
             async with httpx.AsyncClient(timeout=300) as client:
                 r = await client.post(
                     f"{pod.endpoint_url}/v1/chat/completions",
@@ -403,7 +405,8 @@ async def _stream_response(
     idempotency_key, api_key_id,
 ):
     """SSE streaming passthrough from Ollama with cost accounting on close."""
-    payload = _build_inference_payload(body, stream=True, model=pod.model or None)
+    resolved = await _resolve_image_urls(body.messages) if pod.provider in _OLLAMA_PROVIDERS and has_image_content(body.messages) else None
+    payload = _build_inference_payload(body, stream=True, model=pod.model or None, messages=resolved)
 
     async def event_generator():
         start_ms = int(time.time() * 1000)
@@ -459,10 +462,57 @@ async def _stream_response(
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
-def _build_inference_payload(body: ChatCompletionRequest, *, stream: bool, model: str | None = None) -> dict:
+# Providers that speak Ollama — require base64 data URIs, not external image URLs.
+_OLLAMA_PROVIDERS = {"runpod", "vast", "lambda", "local", "mock"}
+
+
+async def _resolve_image_urls(messages: list) -> list[dict]:
+    """Fetch external image URLs and re-encode as base64 data URIs.
+
+    Ollama's /v1/chat/completions rejects https:// image URLs — it only accepts
+    data:image/...;base64,... URIs. Called only for Ollama-backed providers.
+    """
+    result = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for msg in messages:
+            content = msg.content if hasattr(msg, "content") else msg.get("content")
+            role = msg.role if hasattr(msg, "role") else msg.get("role")
+            if isinstance(content, list):
+                new_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        url = (part.get("image_url") or {}).get("url", "")
+                        if url.startswith("http://") or url.startswith("https://"):
+                            try:
+                                r = await client.get(url)
+                                r.raise_for_status()
+                                ct = r.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                                b64 = base64.b64encode(r.content).decode()
+                                new_parts.append({"type": "image_url", "image_url": {"url": f"data:{ct};base64,{b64}"}})
+                                log.debug("image_url_resolved", url=url[:80])
+                            except Exception as exc:
+                                log.warning("image_fetch_failed", url=url[:80], error=str(exc))
+                                new_parts.append(part)
+                        else:
+                            new_parts.append(part)
+                    else:
+                        new_parts.append(part)
+                result.append({"role": role, "content": new_parts})
+            else:
+                result.append({"role": role, "content": content})
+    return result
+
+
+def _build_inference_payload(
+    body: ChatCompletionRequest,
+    *,
+    stream: bool,
+    model: str | None = None,
+    messages: list | None = None,
+) -> dict:
     payload: dict = {
         "model": model or body.model,
-        "messages": [{"role": m.role, "content": m.content} for m in body.messages],
+        "messages": messages if messages is not None else [{"role": m.role, "content": m.content} for m in body.messages],
         "stream": stream,
     }
     if body.temperature is not None:
