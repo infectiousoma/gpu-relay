@@ -223,7 +223,7 @@ async def users_tiers(
       llmctl users tiers user@example.com --set simple,architecture
       llmctl users tiers user@example.com --set all     # remove restriction
     """
-    from bridge.router import TIER_ORDER
+    from bridge.router import get_tiers
 
     async with SessionLocal() as session:
         user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
@@ -236,10 +236,11 @@ async def users_tiers(
                 user.allowed_tiers = None
                 new_val = None
             else:
+                valid_tiers = list(get_tiers().keys())
                 tiers = [t.strip() for t in set_tiers.split(",") if t.strip()]
-                invalid = [t for t in tiers if t not in TIER_ORDER]
+                invalid = [t for t in tiers if t not in valid_tiers]
                 if invalid:
-                    err_console.print(f"Unknown tier(s): {invalid}. Valid: {TIER_ORDER}")
+                    err_console.print(f"Unknown tier(s): {invalid}. Valid: {valid_tiers}")
                     raise typer.Exit(1)
                 user.allowed_tiers = tiers
                 new_val = tiers
