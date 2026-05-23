@@ -20,6 +20,7 @@ If preprocessor fails, pipeline falls back to plain infer.
 
 from __future__ import annotations
 
+import base64
 import json
 
 import httpx
@@ -63,6 +64,13 @@ WORKFLOW_MODELS: dict[str, dict] = {
         "gpu_tier": "maximum",
         "workflow": "architecture_design",
         "description": "Local parse → GPU design → local checklist → GPU implementation details",
+    },
+    "llm-visual-html": {
+        "id": "llm-visual-html",
+        "name": "Visual HTML Generator",
+        "gpu_tier": "vision",
+        "workflow": "visual_html",
+        "description": "LLaVA describes image → local coder generates HTML with image embedded as base64",
     },
 }
 
@@ -202,6 +210,7 @@ class WorkflowOrchestrator:
             "code_review": self._code_review,
             "refactoring": self._refactoring,
             "architecture_design": self._architecture_design,
+            "visual_html": self._visual_html,
         }
         handler = handlers.get(workflow)
         if handler is None:
@@ -214,10 +223,10 @@ class WorkflowOrchestrator:
     # ------------------------------------------------------------------
 
     async def _gpu_call(
-        self, pod_endpoint: str, messages: list[dict], max_tokens: int = 2048
+        self, pod_endpoint: str, messages: list[dict], max_tokens: int = 2048, model: str = "assistant"
     ) -> str:
         payload = {
-            "model": "assistant",
+            "model": model,
             "messages": messages,
             "stream": False,
             "options": {"num_predict": max_tokens},
@@ -530,6 +539,122 @@ Be specific and practical."""
             f"\n\n---\n\n## Implementation Details\n\n{details}"
         )
         return final, meta
+
+
+    # ------------------------------------------------------------------
+    # Workflow: visual_html (llm-visual-html)
+    # ------------------------------------------------------------------
+
+    async def _visual_html(
+        self, user_content: str, request: ChatCompletionRequest, pod_endpoint: str, meta: dict
+    ) -> tuple[str, dict]:
+        from providers.base import TIER_MODEL
+
+        # Extract image from request (handles both data URIs and https:// URLs)
+        meta["stages"].append("extract_image")
+        try:
+            image_data_uri, _ = await self._extract_image_data(request)
+        except ValueError as exc:
+            log.warning("visual_html_no_image", error=str(exc))
+            return (
+                "No image found in the request. Attach an image to use the Visual HTML Generator.",
+                meta,
+            )
+
+        # Stage 1: Vision pod — describe image thoroughly
+        meta["stages"].append("vision:describe")
+        describe_messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Describe this image thoroughly for use in an HTML page. "
+                            "Include: what is shown, colors, mood, visual style, any visible text, "
+                            "and overall context. Be specific."
+                        ),
+                    },
+                    {"type": "image_url", "image_url": {"url": image_data_uri}},
+                ],
+            }
+        ]
+        try:
+            description = await self._gpu_call(
+                pod_endpoint, describe_messages, max_tokens=512, model=TIER_MODEL["vision"]
+            )
+            meta["image_description"] = description
+            log.info("visual_html_described", chars=len(description))
+        except Exception as exc:
+            log.warning("visual_html_describe_failed", error=str(exc))
+            meta["errors"].append(f"describe: {exc}")
+            description = "An image provided by the user."
+
+        # Stage 2: Local coder — generate HTML using a placeholder for the base64 image.
+        # The model outputs the placeholder verbatim; we inject the real data URI after.
+        meta["stages"].append("local:generate_html")
+        _PLACEHOLDER = "___IMAGE_SRC_PLACEHOLDER___"
+        html_prompt = f"""\
+User request: {user_content or "Create a nice HTML page featuring this image."}
+
+Image description:
+{description}
+
+Generate a complete, self-contained HTML page that:
+- Embeds the image using exactly this src attribute value: {_PLACEHOLDER}
+- Has attractive inline CSS (no external stylesheets or scripts)
+- Includes a title, heading, and caption derived from the image description
+- Looks polished and professional
+
+Output ONLY the complete HTML starting with <!DOCTYPE html>. No explanation."""
+
+        try:
+            html_raw = await self._local_call(
+                system=(
+                    "You are an expert HTML/CSS developer. "
+                    "Generate complete, self-contained HTML pages with inline CSS. "
+                    f"Use the exact string {_PLACEHOLDER} as the <img> src — do not alter it."
+                ),
+                user=html_prompt,
+                max_tokens=4096,
+            )
+        except Exception as exc:
+            log.warning("visual_html_generate_failed", error=str(exc))
+            meta["errors"].append(f"generate_html: {exc}")
+            html_raw = f'<html><body><img src="{_PLACEHOLDER}"><p>{description}</p></body></html>'
+
+        # Inject the actual base64 data URI in place of the placeholder
+        final_html = html_raw.replace(_PLACEHOLDER, image_data_uri)
+        meta["placeholder_injected"] = _PLACEHOLDER in html_raw
+        if not meta["placeholder_injected"]:
+            log.warning("visual_html_placeholder_missing")
+
+        return final_html, meta
+
+    async def _extract_image_data(self, request: ChatCompletionRequest) -> tuple[str, str]:
+        """Return (data_uri, content_type) for the first image in the request.
+
+        Handles both already-encoded data URIs (Open WebUI uploads) and https:// URLs.
+        """
+        for msg in reversed(request.messages):
+            content = msg.content
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if not isinstance(part, dict) or part.get("type") != "image_url":
+                    continue
+                url = (part.get("image_url") or {}).get("url", "")
+                if url.startswith("data:"):
+                    ct = url.split(";")[0].replace("data:", "")
+                    return url, ct
+                if url.startswith("http"):
+                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                        r = await client.get(url)
+                        r.raise_for_status()
+                        ct = r.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                        b64 = base64.b64encode(r.content).decode()
+                        return f"data:{ct};base64,{b64}", ct
+        raise ValueError("No image_url content part found in request messages")
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 - `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin
 - `bridge/router.py` — tier selection (tokens/files/keywords/budget)
 - `bridge/instance_manager.py` — pod pool, lifecycle, health, reaper
-- `bridge/multi_model.py` — pipeline (preprocess→infer→postprocess), WorkflowOrchestrator
+- `bridge/multi_model.py` — pipeline (preprocess→infer→postprocess), WorkflowOrchestrator; `llm-visual-html` workflow does vision-describe → local HTML generation with base64 image injection
 - `bridge/settings.py` — all env vars via pydantic-settings
 - `providers/base.py` — BaseProvider ABC; `provider_type`: `"pod"/"local"/"api"`
 - `providers/runpod.py`, `vast.py`, `lambda_labs.py` — cloud GPU pod providers

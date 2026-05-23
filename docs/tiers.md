@@ -48,6 +48,7 @@ Same Ollama models as pod providers. Zero cost — budget gate skipped.
 - `llm-code-review` — preprocessor → architecture tier
 - `llm-refactor` — preprocessor → architecture tier
 - `llm-arch-design` — preprocessor → maximum tier
+- `llm-visual-html` — LLaVA describes image → local coder generates HTML with image embedded as base64
 
 ## Auto-Routing Logic
 
