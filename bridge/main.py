@@ -301,6 +301,12 @@ async def chat_completions(
             idempotency_key, api_key_id,
         )
 
+    # Resolve external image URLs to base64 before entering the inference try/except
+    # so HTTPException from fetch failures propagates directly (not wrapped as 502).
+    resolved_messages: list | None = None
+    if not workflow_def and pod.provider in _OLLAMA_PROVIDERS and has_image_content(body.messages):
+        resolved_messages = await _resolve_image_urls(body.messages)
+
     manager.mark_active(pod.pod_id)
     start_ms = int(time.time() * 1000)
     error_message: str | None = None
@@ -320,8 +326,7 @@ async def chat_completions(
             completion_tokens = max(1, len(completion_text) // 4)
         else:
             # --- Standard non-streaming ---
-            resolved = await _resolve_image_urls(body.messages) if pod.provider in _OLLAMA_PROVIDERS and has_image_content(body.messages) else None
-            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved)
+            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved_messages)
             async with httpx.AsyncClient(timeout=300) as client:
                 r = await client.post(
                     f"{pod.endpoint_url}/v1/chat/completions",
