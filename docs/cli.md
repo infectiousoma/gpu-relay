@@ -1,11 +1,27 @@
 # CLI Reference
 
-All commands run via Docker or the `llmctl` entrypoint:
+Commands run inside the bridge container. Two equivalent forms:
+
 ```bash
+# Always works — no setup required
 docker compose run --rm bridge python -m cli.llm_ctl <command>
-# or
+
+# Short form — requires one-time symlink install (see below)
 llmctl <command>
 ```
+
+## Installing the `llmctl` shortcut (optional)
+
+From the repo root:
+```bash
+# System-wide (requires sudo)
+sudo ln -sf "$(pwd)/scripts/llmctl" /usr/local/bin/llmctl
+
+# Per-user (no sudo — ensure ~/.local/bin is in $PATH)
+mkdir -p ~/.local/bin && ln -sf "$(pwd)/scripts/llmctl" ~/.local/bin/llmctl
+```
+
+The script resolves the repo root via `readlink -f`, so it works correctly even when called through the symlink from any directory.
 
 ## User Management
 

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# llmctl — thin wrapper around the CLI running inside the bridge container.
+#
+# Install (run once from the repo root):
+#   sudo ln -sf "$(pwd)/scripts/llmctl" /usr/local/bin/llmctl
+#   # or without sudo:
+#   mkdir -p ~/.local/bin && ln -sf "$(pwd)/scripts/llmctl" ~/.local/bin/llmctl
+#
+# Then use from anywhere:
+#   llmctl users list
+#   llmctl users tiers user@example.com --set simple,vision
+
+set -euo pipefail
+
+# Resolve the repo root relative to this script so the symlink works from any CWD.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+exec docker compose -f "$REPO_ROOT/docker-compose.yml" run --rm bridge python -m cli.llm_ctl "$@"
