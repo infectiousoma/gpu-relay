@@ -492,7 +492,14 @@ async def _resolve_image_urls(messages: list) -> list[dict]:
                                 log.debug("image_url_resolved", url=url[:80])
                             except Exception as exc:
                                 log.warning("image_fetch_failed", url=url[:80], error=str(exc))
-                                new_parts.append(part)
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=(
+                                        f"Cannot fetch image URL for Ollama: {exc}. "
+                                        "Send a base64 data URI instead: "
+                                        "data:image/png;base64,<encoded>"
+                                    ),
+                                )
                         else:
                             new_parts.append(part)
                     else:
