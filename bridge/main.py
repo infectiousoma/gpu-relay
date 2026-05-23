@@ -478,7 +478,7 @@ async def _resolve_image_urls(messages: list) -> list[dict]:
     data:image/...;base64,... URIs. Called only for Ollama-backed providers.
     """
     result = []
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         for msg in messages:
             content = msg.content if hasattr(msg, "content") else msg.get("content")
             role = msg.role if hasattr(msg, "role") else msg.get("role")
