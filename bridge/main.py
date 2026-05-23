@@ -25,6 +25,7 @@ from typing import Annotated
 import httpx
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
@@ -579,6 +580,20 @@ async def admin_list_users(
 # ---------------------------------------------------------------------------
 # Error handlers
 # ---------------------------------------------------------------------------
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "message": f"Request validation failed: {exc.errors()[0]['msg']}",
+                "type": "invalid_request_error",
+                "details": exc.errors(),
+            }
+        },
+    )
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
