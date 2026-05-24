@@ -147,7 +147,13 @@ def _highest(a: str, b: str) -> str:
 
 
 def _allowed_tiers(user: User) -> list[str] | None:
-    return getattr(user, "allowed_tiers", None) or None
+    """Effective tier whitelist = intersection of admin ceiling and user preference."""
+    admin_ceiling = getattr(user, "allowed_tiers", None) or None
+    preferred = getattr(user, "preferred_tiers", None) or None
+    if admin_ceiling and preferred:
+        merged = [t for t in preferred if t in admin_ceiling]
+        return merged or admin_ceiling  # fallback to ceiling if preference empties the list
+    return preferred or admin_ceiling
 
 
 async def select_tier(

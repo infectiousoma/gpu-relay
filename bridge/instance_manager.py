@@ -106,15 +106,23 @@ class InstanceManager:
     # Public API
     # ------------------------------------------------------------------
 
-    async def acquire(self, tier: str, provider_override: str | None = None) -> PodHandle:
+    async def acquire(
+        self,
+        tier: str,
+        provider_override: str | None = None,
+        disabled_providers: list[str] | None = None,
+    ) -> PodHandle:
         """Return a ready PodHandle; spins a new pod if none available.
 
         provider_override: if set (from X-Provider header), try this provider first.
+        disabled_providers: per-user list of providers to skip.
         """
         async with SessionLocal() as session:
             pod = await self._get_ready_pod(tier, session, provider=provider_override)
             if pod:
                 return self._handle(pod, cold_start=False)
+
+        _disabled = set(disabled_providers or [])
 
         # No ready pod — try providers in priority order
         last_error: Exception | None = None
@@ -128,6 +136,10 @@ class InstanceManager:
         # Per-request override: bubble requested provider to front
         if provider_override and provider_override in self._providers:
             priority = [provider_override] + [p for p in priority if p != provider_override]
+
+        # Filter out providers the user has disabled
+        if _disabled:
+            priority = [p for p in priority if p not in _disabled]
 
         for provider_name in priority:
             provider = self._providers.get(provider_name)

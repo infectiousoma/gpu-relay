@@ -33,6 +33,7 @@ from database.models import (
     RequestStatus,
     TierName,
     User,
+    UserProviderKey,
     UserRole,
 )
 
@@ -140,7 +141,9 @@ def get_all_users_with_stats(session: Session) -> list[dict]:
             "prepaid_balance_usd": float(u.prepaid_balance_usd),
             "monthly_spend_usd": float(spend),
             "monthly_requests": int(reqs),
-            "allowed_tiers": u.allowed_tiers,  # None = unrestricted
+            "allowed_tiers": u.allowed_tiers,       # None = unrestricted (admin ceiling)
+            "preferred_tiers": u.preferred_tiers,   # user's own subset preference
+            "disabled_providers": u.disabled_providers or [],
             "max_tier": quota.max_tier if quota else "ultra",
             "rpm": quota.requests_per_minute if quota else 60,
             "tpd": quota.tokens_per_day if quota else 1_000_000,
@@ -331,3 +334,50 @@ def get_today_usage_by_tier(session: Session) -> list[dict]:
     """)
     rows = session.execute(q).fetchall()
     return [{"tier": r.tier, "requests": r.requests, "hours": r.hours, "cost_usd": r.cost_usd} for r in rows]
+
+
+def get_user_provider_keys(session: Session, user_id: str) -> list[dict]:
+    """Return list of provider names that have a stored key for this user (no plaintext)."""
+    rows = session.execute(
+        select(UserProviderKey).where(UserProviderKey.user_id == user_id)
+    ).scalars().all()
+    return [{"provider": r.provider, "created_at": r.created_at} for r in rows]
+
+
+def upsert_user_provider_key(session: Session, user_id: str, provider: str, encrypted_key: str) -> None:
+    existing = session.execute(
+        select(UserProviderKey).where(
+            UserProviderKey.user_id == user_id,
+            UserProviderKey.provider == provider,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        existing.encrypted_key = encrypted_key
+    else:
+        session.add(UserProviderKey(user_id=user_id, provider=provider, encrypted_key=encrypted_key))
+    session.commit()
+
+
+def delete_user_provider_key(session: Session, user_id: str, provider: str) -> None:
+    existing = session.execute(
+        select(UserProviderKey).where(
+            UserProviderKey.user_id == user_id,
+            UserProviderKey.provider == provider,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.commit()
+
+
+def update_user_preferences(
+    session: Session,
+    user_id: str,
+    preferred_tiers: list[str] | None,
+    disabled_providers: list[str] | None,
+) -> None:
+    user = session.get(User, user_id)
+    if user:
+        user.preferred_tiers = preferred_tiers or None
+        user.disabled_providers = disabled_providers or None
+        session.commit()

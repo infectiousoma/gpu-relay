@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     tokens_per_day_default: int = 1_000_000
     billing_mode_default: str = "postpaid"
 
+    # --- User provider key encryption ---
+    provider_key_secret: str = "change-me-provider-key-secret"  # set PROVIDER_KEY_SECRET in .env
+
     # --- Tier config ---
     tiers_config_path: Path = REPO_ROOT / "config" / "tiers.yaml"
 

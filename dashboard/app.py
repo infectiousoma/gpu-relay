@@ -70,7 +70,7 @@ def _sidebar_nav() -> str:
         st.caption(f"Signed in as **{st.session_state.get('user_email', '?')}**{role_label}")
         st.divider()
 
-        pages = ["📊 Overview", "📈 Analytics", "💳 Billing"]
+        pages = ["📊 Overview", "📈 Analytics", "💳 Billing", "⚙️ Settings"]
         if _is_admin():
             pages += ["👥 Users", "🖥️ Monitoring"]
 
@@ -106,6 +106,9 @@ def main() -> None:
         render()
     elif page == "🖥️ Monitoring":
         from dashboard.pages.monitoring import render
+        render()
+    elif page == "⚙️ Settings":
+        from dashboard.pages.settings import render
         render()
 
 

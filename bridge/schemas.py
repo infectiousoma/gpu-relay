@@ -141,6 +141,7 @@ class TokenResponse(BaseModel):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
     role: str = "user"
+    user_id: str = ""
 
 
 class ApiKeyResponse(BaseModel):

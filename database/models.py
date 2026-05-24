@@ -115,14 +115,19 @@ class User(Base):
     prepaid_balance_usd: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     pipeline_default: Mapped[str] = mapped_column(String(64), default="infer", nullable=False)
-    # null = unrestricted; list of TierName values = whitelist
+    # null = unrestricted; list of TierName values = whitelist (admin-set ceiling)
     allowed_tiers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
+    # user's own preference — subset of allowed_tiers; null = use all allowed
+    preferred_tiers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
+    # providers user has disabled for their requests; null = use all
+    disabled_providers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     quota: Mapped["Quota"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     requests: Mapped[list["Request"]] = relationship(back_populates="user")
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="user")
+    provider_keys: Mapped[list["UserProviderKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("monthly_budget_usd >= 0", name="ck_users_budget_nonneg"),
@@ -143,6 +148,24 @@ class ApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="api_keys")
+
+
+class UserProviderKey(Base):
+    """User-supplied API key for a specific provider (encrypted at rest)."""
+
+    __tablename__ = "user_provider_keys"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="provider_keys")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_provider_key"),
+    )
 
 
 class Quota(Base):

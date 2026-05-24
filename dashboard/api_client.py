@@ -39,6 +39,7 @@ def login(email: str, password: str) -> bool:
             data = r.json()
             st.session_state["bridge_token"] = data["access_token"]
             st.session_state["user_role"] = data.get("role", "user")
+            st.session_state["user_id"] = data.get("user_id", "")
             return True
     except Exception as exc:
         st.error(f"Login error: {exc}")

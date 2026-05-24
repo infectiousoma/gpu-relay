@@ -66,8 +66,9 @@ from bridge.schemas import (
     TokenResponse,
     Usage,
 )
+from bridge.crypto import decrypt_provider_key
 from bridge.settings import settings
-from database.models import ApiKey, Pod, PodStatus, Request as DBRequest, RequestStatus, User
+from database.models import ApiKey, Pod, PodStatus, Request as DBRequest, RequestStatus, User, UserProviderKey
 from database.session import SessionLocal, get_session
 
 log = structlog.get_logger(__name__)
@@ -245,8 +246,10 @@ async def chat_completions(
 
     # --- Acquire pod ---
     provider_override = request.headers.get("x-provider") or None
+    _disabled = list(user.disabled_providers or [])
     try:
-        pod = await manager.acquire(decision.tier, provider_override=provider_override)
+        pod = await manager.acquire(decision.tier, provider_override=provider_override, disabled_providers=_disabled)
+        await _apply_user_provider_key(pod, user.id, session)
     except Exception as exc:
         log.error("acquire_failed", tier=decision.tier, error=str(exc))
         if decision.tier == "vision":
@@ -549,6 +552,24 @@ _VISION_SYSTEM_PROMPT = (
 )
 
 
+async def _apply_user_provider_key(pod, user_id: str, session: AsyncSession) -> None:
+    """Override pod.extra_headers with user's own API key for this provider, if stored."""
+    row = await session.execute(
+        select(UserProviderKey).where(
+            UserProviderKey.user_id == user_id,
+            UserProviderKey.provider == pod.provider,
+        )
+    )
+    upk = row.scalar_one_or_none()
+    if upk:
+        try:
+            plaintext = decrypt_provider_key(upk.encrypted_key)
+            pod.extra_headers = dict(pod.extra_headers)
+            pod.extra_headers["Authorization"] = f"Bearer {plaintext}"
+        except Exception:
+            pass  # decryption failed — fall through to admin key
+
+
 def _inject_vision_system(messages: list) -> list:
     """Prepend grounding system message if none exists."""
     if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
@@ -631,7 +652,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     token, expires_in = create_access_token(user.id)
-    return TokenResponse(access_token=token, expires_in=expires_in, role=user.role.value)
+    return TokenResponse(access_token=token, expires_in=expires_in, role=user.role.value, user_id=user.id)
 
 
 @app.post("/auth/keys", response_model=ApiKeyResponse)
