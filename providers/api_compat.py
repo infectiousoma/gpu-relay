@@ -123,8 +123,8 @@ class TogetherProvider(OpenAICompatProvider):
     name = "together"
     _base_url = "https://api.together.xyz"
     _default_models = {
-        "vision":       "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
-        "simple":       "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+        "vision":       "meta-llama/Llama-Vision-Free",
+        "simple":       "meta-llama/Llama-3.1-8B-Instruct-Turbo",
         "architecture": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
         "maximum":      "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
         "ultra":        "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
