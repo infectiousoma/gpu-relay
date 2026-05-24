@@ -107,6 +107,13 @@ def _render_user_detail(u: dict) -> None:
         else:
             add_credit = 0.0
 
+        new_allow_local = st.checkbox(
+            "Allow local provider",
+            value=u.get("allow_local", True),
+            key=f"allow_local_{u['id']}",
+            help="Uncheck to prevent this user from routing requests to the local GPU.",
+        )
+
         bcol1, bcol2 = st.columns(2)
         submitted = bcol1.form_submit_button("💾 Save changes", type="primary")
         suspend = bcol2.form_submit_button(
@@ -122,6 +129,7 @@ def _render_user_detail(u: dict) -> None:
                         user.prepaid_balance_usd += Decimal(str(add_credit))
                     # None = unrestricted; non-empty list = whitelist
                     user.allowed_tiers = new_allowed_tiers if new_allowed_tiers else None
+                    user.allow_local = new_allow_local
                     quota = session.get(Quota, u["id"])
                     if quota:
                         quota.usd_per_month = Decimal(str(new_budget))

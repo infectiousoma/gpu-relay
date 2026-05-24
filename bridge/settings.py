@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     tokens_per_day_default: int = 1_000_000
     billing_mode_default: str = "postpaid"
 
+    # --- Local GPU / inference control ---
+    # 0=CPU/none 1=4-8GB 2=8-12GB 3=16-24GB(3090/4090) 4=24-48GB(A40/A6000) 5=48+GB(A100/H100)
+    local_gpu_level: int = Field(default=3, ge=0, le=5)
+    # Whether local Ollama may be used for preprocessing (works even at level 0 with small model)
+    local_preprocess_enabled: bool = True
+
     # --- User provider key encryption ---
     provider_key_secret: str = "change-me-provider-key-secret"  # set PROVIDER_KEY_SECRET in .env
 

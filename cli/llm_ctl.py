@@ -271,6 +271,28 @@ async def users_deactivate(email: str):
     console.print(f"[yellow]Deactivated[/yellow] {email}")
 
 
+@users_app.command("local-access")
+@async_cmd
+async def users_local_access(
+    email: str,
+    allow: Optional[bool] = typer.Option(None, "--allow/--deny", help="Grant or revoke local provider access"),
+):
+    """Show or set whether a user may use the local provider."""
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if not user:
+            err_console.print(f"User not found: {email}")
+            raise typer.Exit(1)
+        if allow is None:
+            status = "[green]allowed[/green]" if getattr(user, "allow_local", True) else "[red]denied[/red]"
+            console.print(f"Local access for {email}: {status}")
+        else:
+            user.allow_local = allow
+            await session.commit()
+            status = "[green]granted[/green]" if allow else "[red]denied[/red]"
+            console.print(f"Local access {status} for {email}")
+
+
 # ---------------------------------------------------------------------------
 # users keys sub-commands (registered on users_app)
 # ---------------------------------------------------------------------------

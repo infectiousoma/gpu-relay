@@ -123,6 +123,8 @@ class User(Base):
     disabled_providers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
     # user's preferred provider order; null = use tier defaults
     provider_order: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
+    # admin-controlled: whether this user may use the local provider
+    allow_local: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")

@@ -240,6 +240,8 @@ async def chat_completions(
 
     # --- Multi-model pipeline (preprocess stage, non-workflow only) ---
     pipeline = body.pipeline or user.pipeline_default or settings.pipeline_default
+    if not settings.local_preprocess_enabled and "preprocess" in pipeline:
+        pipeline = ",".join(s for s in pipeline.split(",") if s.strip() != "preprocess")
     pipeline_meta: dict = {"stages_run": [], "preprocessor_output": None, "errors": []}
     if not workflow_def:
         body, pipeline_meta = await run_pipeline(body, pipeline)
@@ -247,6 +249,8 @@ async def chat_completions(
     # --- Acquire pod ---
     provider_override = request.headers.get("x-provider") or None
     _disabled = list(user.disabled_providers or [])
+    if not getattr(user, "allow_local", True):
+        _disabled = list({*_disabled, "local"})
     _provider_order = list(user.provider_order or [])
     try:
         pod = await manager.acquire(decision.tier, provider_override=provider_override, disabled_providers=_disabled, provider_order=_provider_order or None)
