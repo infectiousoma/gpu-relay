@@ -316,7 +316,7 @@ class InstanceManager:
         """
         api_providers = [
             name for name, p in self._providers.items()
-            if getattr(p, "provider_type", "") == "api"
+            if getattr(p, "provider_type", "") in ("api", "local")
         ]
         if not api_providers:
             return
