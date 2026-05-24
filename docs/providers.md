@@ -128,6 +128,8 @@ Hardware is tried in price order; capacity misses fall through to the next optio
 
 **Cost:** Billed per hour by Together while the dedicated endpoint is `RUNNING` (~$1.49–$6.49/hr depending on GPU). No serverless per-token charge.
 
+**Balance:** Together has no public balance API. Dashboard shows a link to https://api.together.ai/settings/billing — check balance there manually.
+
 ---
 
 ## Vast.ai / Lambda Labs
