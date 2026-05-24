@@ -84,7 +84,7 @@ class OpenAICompatProvider(BaseProvider):
 
 class OpenAIProvider(OpenAICompatProvider):
     name = "openai"
-    _base_url = "https://api.openai.com/v1"
+    _base_url = "https://api.openai.com"
     _default_models = {
         "simple":       "gpt-4o-mini",
         "architecture": "gpt-4o",
@@ -106,8 +106,9 @@ class OpenAIProvider(OpenAICompatProvider):
 
 class GroqProvider(OpenAICompatProvider):
     name = "groq"
-    _base_url = "https://api.groq.com/openai/v1"
+    _base_url = "https://api.groq.com/openai"
     _default_models = {
+        "vision":       "llama-3.2-11b-vision-preview",
         "simple":       "llama-3.1-8b-instant",
         "architecture": "llama-3.3-70b-versatile",
         "maximum":      "llama-3.3-70b-versatile",
@@ -120,8 +121,9 @@ class GroqProvider(OpenAICompatProvider):
 
 class TogetherProvider(OpenAICompatProvider):
     name = "together"
-    _base_url = "https://api.together.xyz/v1"
+    _base_url = "https://api.together.xyz"
     _default_models = {
+        "vision":       "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
         "simple":       "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
         "architecture": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
         "maximum":      "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
@@ -134,7 +136,7 @@ class TogetherProvider(OpenAICompatProvider):
 
 class MistralProvider(OpenAICompatProvider):
     name = "mistral"
-    _base_url = "https://api.mistral.ai/v1"
+    _base_url = "https://api.mistral.ai"
     _default_models = {
         "simple":       "mistral-small-latest",
         "architecture": "mistral-medium-latest",
@@ -148,7 +150,7 @@ class MistralProvider(OpenAICompatProvider):
 
 class DeepSeekProvider(OpenAICompatProvider):
     name = "deepseek"
-    _base_url = "https://api.deepseek.com/v1"
+    _base_url = "https://api.deepseek.com"
     _default_models = {
         "simple":       "deepseek-chat",
         "architecture": "deepseek-chat",

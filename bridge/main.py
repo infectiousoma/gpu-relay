@@ -67,7 +67,7 @@ from bridge.schemas import (
     Usage,
 )
 from bridge.settings import settings
-from database.models import ApiKey, Request as DBRequest, RequestStatus, User
+from database.models import ApiKey, Pod, PodStatus, Request as DBRequest, RequestStatus, User
 from database.session import SessionLocal, get_session
 
 log = structlog.get_logger(__name__)
@@ -244,8 +244,9 @@ async def chat_completions(
         body, pipeline_meta = await run_pipeline(body, pipeline)
 
     # --- Acquire pod ---
+    provider_override = request.headers.get("x-provider") or None
     try:
-        pod = await manager.acquire(decision.tier)
+        pod = await manager.acquire(decision.tier, provider_override=provider_override)
     except Exception as exc:
         log.error("acquire_failed", tier=decision.tier, error=str(exc))
         if decision.tier == "vision":
@@ -307,6 +308,12 @@ async def chat_completions(
     if not workflow_def and pod.provider in _OLLAMA_PROVIDERS and has_image_content(body.messages):
         resolved_messages = await _resolve_image_urls(body.messages)
 
+    if not workflow_def and decision.tier == "vision" and has_image_content(body.messages):
+        base = resolved_messages if resolved_messages is not None else [{"role": m.role, "content": m.content} for m in body.messages]
+        if pod.provider not in _OLLAMA_PROVIDERS:
+            base = _sanitize_messages_for_api_vision(base)
+        resolved_messages = _inject_vision_system(base)
+
     manager.mark_active(pod.pod_id)
     start_ms = int(time.time() * 1000)
     error_message: str | None = None
@@ -333,7 +340,10 @@ async def chat_completions(
                     json=payload,
                     headers=pod.extra_headers,
                 )
-                r.raise_for_status()
+                if not r.is_success:
+                    err_text = r.text[:2000]
+                    log.error("inference_http_error", status=r.status_code, provider=pod.provider, body=err_text)
+                    raise Exception(f"Provider {pod.provider} HTTP {r.status_code}: {err_text}")
                 data = r.json()
 
             choice = data["choices"][0]
@@ -411,6 +421,11 @@ async def _stream_response(
 ):
     """SSE streaming passthrough from Ollama with cost accounting on close."""
     resolved = await _resolve_image_urls(body.messages) if pod.provider in _OLLAMA_PROVIDERS and has_image_content(body.messages) else None
+    if decision.tier == "vision" and has_image_content(body.messages):
+        base = resolved if resolved is not None else [{"role": m.role, "content": m.content} for m in body.messages]
+        if pod.provider not in _OLLAMA_PROVIDERS:
+            base = _sanitize_messages_for_api_vision(base)
+        resolved = _inject_vision_system(base)
     payload = _build_inference_payload(body, stream=True, model=pod.model or None, messages=resolved)
 
     async def event_generator():
@@ -422,7 +437,11 @@ async def _stream_response(
         try:
             async with httpx.AsyncClient(timeout=300) as client:
                 async with client.stream("POST", f"{pod.endpoint_url}/v1/chat/completions", json=payload, headers=pod.extra_headers) as resp:
-                    resp.raise_for_status()
+                    if not resp.is_success:
+                        err_body = await resp.aread()
+                        err_text = err_body.decode(errors="replace")[:2000]
+                        log.error("inference_http_error", status=resp.status_code, provider=pod.provider, body=err_text)
+                        raise Exception(f"Provider {pod.provider} HTTP {resp.status_code}: {err_text}")
                     async for line in resp.aiter_lines():
                         if line.startswith("data: "):
                             chunk = line[6:]
@@ -440,6 +459,13 @@ async def _stream_response(
         except Exception as exc:
             error_message = str(exc)
             log.exception("stream_error", pod_id=pod.pod_id)
+            # Mark API provider pod failed so it's not reused on next request.
+            if "model_not_available" in error_message or "non-serverless" in error_message:
+                async with SessionLocal() as _s:
+                    _p = await _s.get(Pod, pod.pod_id)
+                    if _p:
+                        _p.status = PodStatus.failed
+                        await _s.commit()
         finally:
             latency_ms = int(time.time() * 1000) - start_ms
             await manager.release(pod.pod_id, session)
@@ -512,6 +538,60 @@ async def _resolve_image_urls(messages: list) -> list[dict]:
                 result.append({"role": role, "content": new_parts})
             else:
                 result.append({"role": role, "content": content})
+    return result
+
+
+_VISION_SYSTEM_PROMPT = (
+    "You are a precise visual analyst. "
+    "Describe exactly what you see: colors, shapes, visible text, objects, composition, character identities if recognizable. "
+    "Do NOT fabricate details that are not visually present — no invented text, objects, or background elements. "
+    "Report colors as they appear in the image. If a detail is unclear, say so rather than guessing."
+)
+
+
+def _inject_vision_system(messages: list) -> list:
+    """Prepend grounding system message if none exists."""
+    if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+        return messages
+    return [{"role": "system", "content": _VISION_SYSTEM_PROMPT}] + list(messages)
+
+
+def _sanitize_messages_for_api_vision(messages: list) -> list:
+    """Reduce message list to [system?, user_with_image] for API vision providers.
+
+    Llama vision models on Together/etc require:
+    - Strictly alternating user/assistant turns
+    - Only one image per request
+    Multi-turn vision conversations break both rules. Simplest fix: keep only
+    the system message (if any) and the last user message that contains images.
+    """
+    def _has_image(content) -> bool:
+        return isinstance(content, list) and any(
+            (p.get("type") == "image_url" if isinstance(p, dict) else False)
+            for p in content
+        )
+
+    # Collect system message and last user message with image
+    system_msg = None
+    last_image_msg = None
+    for msg in messages:
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        if role == "system" and system_msg is None:
+            system_msg = msg
+        if role == "user" and _has_image(content):
+            # Ensure it has a text part
+            has_text = any(p.get("type") == "text" if isinstance(p, dict) else False for p in content)
+            if not has_text:
+                content = [{"type": "text", "text": "Describe this image."}] + list(content)
+                msg = {"role": role, "content": content}
+            last_image_msg = msg
+
+    result = []
+    if system_msg is not None:
+        result.append(system_msg)
+    if last_image_msg is not None:
+        result.append(last_image_msg)
     return result
 
 
@@ -704,4 +784,4 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
-from database.models import PodStatus
+

@@ -10,9 +10,17 @@
 | `architecture` | Qwen2.5-Coder 32B | RTX 4090 | ~$0.69 |
 | `maximum` | DeepSeek V3 | L40S 48GB | ~$1.14 |
 | `ultra` | Qwen2.5 72B | A100 80GB | ~$1.89 |
-| `vision` | LLaVA 7B (RunPod: LLaVA 34B†) | RTX 4090 | ~$0.69 |
+| `vision` | Llama-3.2-11B-Vision (Together dedicated) / LLaVA 34B (RunPod) | L40 / A100 | ~$1.49–2.40 |
 
-† `TIER_MODEL["vision"]` in `providers/base.py` defaults to `llava:7b`. Change to `llava:34b` for RunPod once a pod template with that image is set up.
+**Vision quality tiers** (Together dedicated endpoints — `providers/together_dedicated.py`):
+
+| Routing tier | Model | Hardware |
+|---|---|---|
+| `simple` | Qwen3-VL-8B-Instruct | L40 48GB / L40S / A100-40GB |
+| `vision` | Llama-3.2-11B-Vision-Instruct-Turbo | L40 48GB / L40S / A100 |
+| `architecture` / `maximum` / `ultra` | Llama-3.2-90B-Vision-Instruct-Turbo | A100-80GB / H100-80GB |
+
+All vision models are capable of text too. Endpoint spins up on first image request, terminates after idle timeout.
 
 Prices sync from live RunPod GPU catalog at startup. Budget gate uses projected hourly cost.
 
@@ -40,7 +48,7 @@ Same Ollama models as pod providers. Zero cost — budget gate skipped.
 - `llm-architecture`
 - `llm-maximum`
 - `llm-ultra`
-- `llm-vision` — LLaVA vision model; selected automatically for image requests
+- `llm-vision` — vision model (Together: Llama-3.2-11B / RunPod: LLaVA 34B); selected automatically for image requests
 - `llm-auto` — router picks based on request complexity
 
 **Workflow models** (multi-step orchestration):

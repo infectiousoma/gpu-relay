@@ -74,7 +74,7 @@ TIER_VRAM_REQUIRED: dict[str, int] = {
     "architecture": 20,   # 32B q4 ≈ 18 GB
     "maximum": 38,        # deepseek-v3 q4 ≈ 36 GB
     "ultra": 50,          # 72B q4 ≈ 48 GB
-    "vision": 10,         # llava:7b q4 ≈ 5 GB; 10 GB floor for vision encoder headroom
+    "vision": 10,         # minicpm-v q4 ≈ 5 GB; 10 GB floor for vision encoder headroom
 }
 
 # Tier → preferred GPU type names (matched against provider GPU names,
@@ -95,7 +95,7 @@ TIER_MODEL: dict[str, str] = {
     "architecture": "qwen2.5-coder:32b-instruct-q4_K_M",
     "maximum":      "deepseek-v3:latest-q4_K_M",
     "ultra":        "qwen2.5:72b-instruct-q4_K_M",
-    "vision":       "llava:7b",
+    "vision":       "minicpm-v",
 }
 
 OLLAMA_PORT = 11434
@@ -116,6 +116,10 @@ class BaseProvider(ABC):
     # "pod"   — full lifecycle: launch, wait-for-ready, pull model, terminate
     # "local" — Ollama already running; wait-for-ready + pull model; no terminate
     # "api"   — commercial API; skip all lifecycle; inject auth headers per request
+
+    needs_ollama_check: bool = True
+    # False → launch() handles its own readiness; instance_manager skips
+    # /api/tags probing and Ollama model pull for this provider.
 
     def is_configured(self) -> bool:
         """Return False if required credentials are missing; skip this provider at startup."""

@@ -40,9 +40,13 @@ def render() -> None:
         selected_user_label = st.selectbox("User", list(user_options.keys()))
         selected_user_id = user_options[selected_user_label]
 
-        tier_options = ["All tiers", "simple", "architecture", "maximum", "ultra"]
+        tier_options = ["All tiers", "simple", "architecture", "maximum", "ultra", "vision"]
         selected_tier_label = st.selectbox("Tier", tier_options)
         selected_tier = None if selected_tier_label == "All tiers" else selected_tier_label
+
+        provider_options = ["All providers", "runpod", "vast", "lambda", "local", "together", "groq", "openai", "mistral", "deepseek"]
+        selected_provider_label = st.selectbox("Provider", provider_options)
+        selected_provider = None if selected_provider_label == "All providers" else selected_provider_label
 
         group_by = st.radio("Group by", ["day", "week", "month"], horizontal=True)
 
@@ -50,7 +54,7 @@ def render() -> None:
     with db_session() as session:
         daily = get_daily_costs(session, days=days, user_id=selected_user_id)
         distribution = get_tier_distribution(session, days=days, user_id=selected_user_id)
-        requests = get_requests_raw(session, days=days, user_id=selected_user_id, tier=selected_tier, limit=50_000)
+        requests = get_requests_raw(session, days=days, user_id=selected_user_id, tier=selected_tier, provider=selected_provider, limit=50_000)
 
     df = pd.DataFrame(requests) if requests else pd.DataFrame()
 
@@ -142,7 +146,7 @@ def render() -> None:
     # --- Raw data + CSV export ---
     st.subheader("Raw Request Data")
     if not df.empty:
-        display_cols = ["created_at", "email", "tier", "model", "prompt_tokens",
+        display_cols = ["created_at", "email", "provider", "tier", "model", "prompt_tokens",
                         "completion_tokens", "latency_ms", "cost_usd", "status", "routing_reason"]
         display_df = df[[c for c in display_cols if c in df.columns]].copy()
         display_df["cost_usd"] = display_df["cost_usd"].apply(lambda x: f"${x:.6f}")

@@ -69,10 +69,51 @@ def _lambda_balance() -> dict | None:
     return {"provider": "Lambda Labs", "balance": None, "note": "Balance API not available"}
 
 
+def _together_balance() -> dict | None:
+    api_key = os.getenv("TOGETHER_API_KEY", "")
+    if not api_key:
+        return None
+    # Try multiple known Together endpoints for balance/user info
+    endpoints = [
+        "https://api.together.xyz/v1/users/me",
+        "https://api.together.xyz/v1/balance",
+    ]
+    for url in endpoints:
+        try:
+            r = httpx.get(
+                url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=_TIMEOUT,
+            )
+            if not r.is_success:
+                continue
+            data = r.json()
+            balance = (
+                data.get("credit_balance")
+                or data.get("balance")
+                or data.get("credits")
+                or data.get("total_credits")
+                or (data.get("user") or {}).get("credit_balance")
+            )
+            if balance is not None:
+                return {"provider": "together", "balance": float(balance), "currency": "USD"}
+        except Exception:
+            continue
+    return {"provider": "together", "balance": None, "note": "API configured — balance not available via API"}
+
+
+def _groq_balance() -> dict | None:
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        return None
+    # Groq is free-tier; no balance endpoint — just confirm key is active
+    return {"provider": "groq", "balance": None, "note": "Free tier — no balance API"}
+
+
 def get_provider_balances() -> list[dict]:
     """Return balance info for all configured providers. Never raises."""
     results = []
-    for fn in (_runpod_balance, _vast_balance, _lambda_balance):
+    for fn in (_runpod_balance, _vast_balance, _lambda_balance, _together_balance, _groq_balance):
         result = fn()
         if result is not None:
             results.append(result)

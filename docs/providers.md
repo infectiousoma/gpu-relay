@@ -7,6 +7,7 @@ The bridge supports four provider categories, mixed freely via `PROVIDER_PRIORIT
 | `runpod`, `vast`, `lambda` | Cloud GPU pod | Rents a GPU, launches Ollama, terminates when idle |
 | `local` | Local GPU | Routes to Ollama on this machine — zero cloud cost |
 | `openai`, `groq`, `together`, `mistral`, `deepseek` | Commercial API | Calls vendor API directly — no pod management |
+| `together_dedicated` | Dedicated GPU pod | Spins up a Together reserved GPU endpoint for vision models; no Ollama — inference via Together API |
 
 ```
 PROVIDER_PRIORITY=runpod,vast,lambda   # try RunPod first, fall back to Vast, then Lambda
@@ -84,6 +85,8 @@ OPENAI_API_KEY=sk-...
 | `mistral` | `MISTRAL_API_KEY` | mistral-small / mistral-medium / mistral-large / mistral-large |
 | `deepseek` | `DEEPSEEK_API_KEY` | deepseek-chat / deepseek-chat / deepseek-reasoner / deepseek-reasoner |
 
+> **Together serverless vs dedicated**: The `together` provider uses Together's serverless API (pay-per-token, text models only). Vision models on Together require dedicated endpoints — use `together_dedicated` instead, which is listed separately under Vision below.
+
 Override any model mapping:
 ```
 OPENAI_MODEL_SIMPLE=gpt-4o-mini
@@ -93,6 +96,35 @@ OPENAI_MODEL_ARCHITECTURE=o1-mini
 > **Note:** Anthropic (Claude) uses a different wire format and is not yet supported.
 
 **Multimodal (images)**: Requests containing `image_url` content parts are automatically routed to the `vision` tier (LLaVA) before any other routing logic. If the requested model already supports vision (`gpt-4o`, `llava`, `gemini`, etc.) the request passes through unchanged. If no vision pod is available, behavior depends on `config/tiers.yaml` → `vision.fallback` (`strip_images` or `error`). See [tiers.md](tiers.md#auto-routing-logic) for details.
+
+---
+
+## Together AI Dedicated Endpoints
+
+Together's vision models are unavailable on the serverless API — they require a reserved GPU (dedicated endpoint). The `together_dedicated` provider manages this lifecycle identically to RunPod.
+
+```
+TOGETHER_API_KEY=<key>
+# Add to vision tier provider_overrides in config/tiers.yaml (already set by default)
+```
+
+**How it works:**
+1. Bridge POSTs to `POST /v1/endpoints` with `{"model": ..., "hardware": ...}`
+2. Polls until state = `RUNNING` (up to 5 min)
+3. Routes inference to `https://api.together.xyz` using the standard Together API
+4. Endpoint is deleted after `idle_timeout_sec` of inactivity
+
+**3-tier vision quality** — model selected based on routing tier:
+
+| Routing tier | Vision model | Hardware |
+|---|---|---|
+| `simple` | Qwen3-VL-8B-Instruct | L40 48GB → L40S → A100-40GB |
+| `vision` | Llama-3.2-11B-Vision-Instruct-Turbo | L40 48GB → L40S → A100 |
+| `architecture` / `maximum` / `ultra` | Llama-3.2-90B-Vision-Instruct-Turbo | A100-80GB → H100-80GB |
+
+Hardware is tried in price order; capacity misses fall through to the next option. If Together has no capacity at all, bridge falls back to RunPod.
+
+**Cost:** Billed per hour by Together while the dedicated endpoint is `RUNNING` (~$1.49–$6.49/hr depending on GPU). No serverless per-token charge.
 
 ---
 

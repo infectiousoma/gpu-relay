@@ -63,26 +63,30 @@ class InstanceManager:
             from providers.vast import VastProvider
             from providers.lambda_labs import LambdaProvider
             from providers.local import LocalProvider
+            from providers.together_dedicated import TogetherDedicatedProvider
             from providers.api_compat import (
                 OpenAIProvider, GroqProvider, TogetherProvider,
                 MistralProvider, DeepSeekProvider,
             )
             candidates = {
-                "runpod":    RunPodProvider(),
-                "vast":      VastProvider(),
-                "lambda":    LambdaProvider(),
-                "local":     LocalProvider(),
-                "openai":    OpenAIProvider(),
-                "groq":      GroqProvider(),
-                "together":  TogetherProvider(),
-                "mistral":   MistralProvider(),
-                "deepseek":  DeepSeekProvider(),
+                "runpod":             RunPodProvider(),
+                "vast":               VastProvider(),
+                "lambda":             LambdaProvider(),
+                "local":              LocalProvider(),
+                "together_dedicated": TogetherDedicatedProvider(),
+                "openai":             OpenAIProvider(),
+                "groq":               GroqProvider(),
+                "together":           TogetherProvider(),
+                "mistral":            MistralProvider(),
+                "deepseek":           DeepSeekProvider(),
             }
             self._providers = {n: p for n, p in candidates.items() if p.is_configured()}
             if not self._providers:
                 log.warning("no_providers_configured")
             else:
                 log.info("providers_configured", providers=list(self._providers))
+        await self._reset_api_provider_pods()
+        await self._cleanup_dedicated_pods()
         self._reaper_task = asyncio.create_task(self._reaper_loop(), name="idle-reaper")
         self._health_task = asyncio.create_task(self._health_loop(), name="health-checker")
         asyncio.create_task(self._sync_prices(), name="price-sync")
@@ -102,16 +106,29 @@ class InstanceManager:
     # Public API
     # ------------------------------------------------------------------
 
-    async def acquire(self, tier: str) -> PodHandle:
-        """Return a ready PodHandle; spins a new pod if none available."""
+    async def acquire(self, tier: str, provider_override: str | None = None) -> PodHandle:
+        """Return a ready PodHandle; spins a new pod if none available.
+
+        provider_override: if set (from X-Provider header), try this provider first.
+        """
         async with SessionLocal() as session:
-            pod = await self._get_ready_pod(tier, session)
+            pod = await self._get_ready_pod(tier, session, provider=provider_override)
             if pod:
                 return self._handle(pod, cold_start=False)
 
         # No ready pod — try providers in priority order
         last_error: Exception | None = None
-        priority = ["mock"] if settings.mock_providers else settings.provider_priority_list
+        if settings.mock_providers:
+            priority = ["mock"]
+        else:
+            from bridge.router import get_tiers
+            _overrides = get_tiers().get(tier, {}).get("provider_overrides") or []
+            priority = _overrides if _overrides else settings.provider_priority_list
+
+        # Per-request override: bubble requested provider to front
+        if provider_override and provider_override in self._providers:
+            priority = [provider_override] + [p for p in priority if p != provider_override]
+
         for provider_name in priority:
             provider = self._providers.get(provider_name)
             if provider is None:
@@ -139,13 +156,18 @@ class InstanceManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _get_ready_pod(self, tier: str, session: AsyncSession) -> Pod | None:
-        result = await session.execute(
-            select(Pod).where(Pod.tier == tier, Pod.status == PodStatus.ready).limit(1)
-        )
+    async def _get_ready_pod(self, tier: str, session: AsyncSession, provider: str | None = None) -> Pod | None:
+        q = select(Pod).where(Pod.tier == tier, Pod.status == PodStatus.ready)
+        if provider:
+            q = q.where(Pod.provider == provider)
+        result = await session.execute(q.limit(1))
         return result.scalar_one_or_none()
 
     async def _spin_pod(self, tier: str, provider_name: str, provider: "BaseProvider") -> PodHandle:
+        # API providers are stateless — upsert the single canonical row per (provider, tier).
+        if getattr(provider, "provider_type", "") == "api":
+            return await self._spin_api_pod(tier, provider_name, provider)
+
         pod_id = str(uuid.uuid4())
         log.info("spinning_pod", tier=tier, provider=provider_name, pod_id=pod_id)
 
@@ -183,13 +205,13 @@ class InstanceManager:
             pod.status = PodStatus.starting
             await session.commit()
 
-        ptype = provider.provider_type
-        if ptype == "api":
-            endpoint = info.endpoint_url
-        else:
+        if getattr(provider, "needs_ollama_check", True):
             endpoint = await self._wait_for_ready(info.endpoint_url, pod_id)
-            if info.model and ptype != "api":
+            if info.model:
                 await self._pull_model(endpoint, info.model, pod_id)
+        else:
+            # Provider handled readiness in launch(); endpoint is already serving.
+            endpoint = info.endpoint_url
 
         async with SessionLocal() as session:
             pod = await session.get(Pod, pod_id)
@@ -205,6 +227,43 @@ class InstanceManager:
                 cost_per_hour_usd=float(pod.cost_per_hour_usd),
                 model=pod.model or "",
                 cold_start=True,
+                extra_headers=provider.extra_request_headers(),
+            )
+
+    async def _spin_api_pod(self, tier: str, provider_name: str, provider: "BaseProvider") -> PodHandle:
+        """Upsert the single canonical DB row for a stateless API provider."""
+        info = await provider.launch(tier)
+        log.info("spinning_pod", tier=tier, provider=provider_name, pod_id=info.external_id)
+        now = datetime.now(timezone.utc)
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Pod).where(Pod.provider == provider_name, Pod.external_id == info.external_id)
+            )
+            pod = result.scalar_one_or_none()
+            if pod is None:
+                pod = Pod(
+                    id=str(uuid.uuid4()),
+                    provider=provider_name,
+                    tier=tier,
+                    external_id=info.external_id,
+                )
+                session.add(pod)
+            pod.gpu = info.gpu
+            pod.model = info.model
+            pod.cost_per_hour_usd = info.cost_per_hour_usd
+            pod.endpoint_url = info.endpoint_url
+            pod.status = PodStatus.ready
+            pod.ready_at = now
+            pod.last_used_at = now
+            await session.commit()
+            return PodHandle(
+                pod_id=pod.id,
+                provider=provider_name,
+                tier=tier,
+                endpoint_url=info.endpoint_url,
+                cost_per_hour_usd=0.0,
+                model=info.model,
+                cold_start=False,
                 extra_headers=provider.extra_request_headers(),
             )
 
@@ -235,6 +294,57 @@ class InstanceManager:
             except Exception as exc:
                 log.warning("model_pull_failed", pod_id=pod_id, model=model, error=str(exc))
                 raise
+
+    async def _reset_api_provider_pods(self) -> None:
+        """Delete stale API provider pod rows on startup so they're recreated with fresh config.
+
+        API providers don't have real pod lifecycle — their rows can survive restarts
+        with stale endpoint_url or model values. Deleting them forces _spin_api_pod to
+        upsert fresh rows on the next request.
+        """
+        api_providers = [
+            name for name, p in self._providers.items()
+            if getattr(p, "provider_type", "") == "api"
+        ]
+        if not api_providers:
+            return
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Pod).where(Pod.provider.in_(api_providers))
+            )
+            pods = result.scalars().all()
+            for pod in pods:
+                await session.delete(pod)
+            await session.commit()
+            if pods:
+                log.info("reset_api_provider_pods", count=len(pods), providers=api_providers)
+
+    async def _cleanup_dedicated_pods(self) -> None:
+        """On startup, terminate any stale dedicated-endpoint pods from prior sessions.
+
+        Unlike API providers, dedicated pods have real running infrastructure that
+        costs money. Delete them from the DB and fire terminate() so Together
+        deallocates the GPU.
+        """
+        dedicated_providers = [
+            name for name, p in self._providers.items()
+            if p.provider_type == "pod" and not getattr(p, "needs_ollama_check", True)
+        ]
+        if not dedicated_providers:
+            return
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Pod).where(Pod.provider.in_(dedicated_providers))
+            )
+            pods = result.scalars().all()
+            for pod in pods:
+                provider = self._providers.get(pod.provider)
+                if provider and pod.external_id and not pod.external_id.startswith("pending-"):
+                    asyncio.create_task(provider.terminate(pod.external_id))
+                await session.delete(pod)
+            await session.commit()
+            if pods:
+                log.info("cleanup_dedicated_pods", count=len(pods), providers=dedicated_providers)
 
     def _handle(self, pod: Pod, *, cold_start: bool) -> PodHandle:
         provider = self._providers.get(pod.provider)
@@ -279,6 +389,11 @@ class InstanceManager:
                 async with httpx.AsyncClient(timeout=5) as client:
                     for pod in pods:
                         if not pod.endpoint_url:
+                            continue
+                        provider = self._providers.get(pod.provider)
+                        # Skip /api/tags probe for non-Ollama providers (they manage
+                        # their own health; false failures would trigger unwanted terminates).
+                        if not getattr(provider, "needs_ollama_check", True):
                             continue
                         try:
                             r = await client.get(f"{pod.endpoint_url}/api/tags")

@@ -19,10 +19,11 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 - `bridge/instance_manager.py` — pod pool, lifecycle, health, reaper
 - `bridge/multi_model.py` — WorkflowOrchestrator; pipeline (preprocess→infer→postprocess) + named workflows (`llm-visual-html`: vision-describe → local HTML generation with base64 image injection)
 - `bridge/settings.py` — all env vars via pydantic-settings
-- `providers/base.py` — BaseProvider ABC; `provider_type`: `"pod"/"local"/"api"`
+- `providers/base.py` — BaseProvider ABC; `provider_type`: `"pod"/"local"/"api"`; `needs_ollama_check`: skip Ollama probe for non-Ollama pods
 - `providers/runpod.py`, `vast.py`, `lambda_labs.py` — cloud GPU pod providers
 - `providers/local.py` — routes to local Ollama, no pod lifecycle
 - `providers/api_compat.py` — OpenAI/Groq/Together/Mistral/DeepSeek pass-through
+- `providers/together_dedicated.py` — Together AI dedicated endpoint provider; spins up reserved GPU for vision models; `_TIER_CONFIG` maps tier → (hardware list, model)
 - `database/models.py` — User, Pod, Request, ApiKey, Invoice
 - `cli/llm_ctl.py` — admin CLI; run via `scripts/llmctl` wrapper (docker compose exec bridge python -m cli.llm_ctl)
 
@@ -34,7 +35,7 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 | architecture | qwen2.5-coder:32b-instruct-q4_K_M | RTX 4090 | ~0.69 |
 | maximum | deepseek-v3:latest-q4_K_M | L40S | ~1.14 |
 | ultra | qwen2.5:72b-instruct-q4_K_M | A100 80GB | ~1.89 |
-| vision | llava:7b (RunPod: llava:34b) | RTX 4090 | ~0.69 |
+| vision | Llama-3.2-11B-Vision (Together dedicated) / llava:34b (RunPod) | L40/A100 | ~1.49–2.40 |
 
 Pod provider prices synced from live RunPod GPU catalog at startup.
 
@@ -47,6 +48,8 @@ Pod provider prices synced from live RunPod GPU catalog at startup.
 - `"local"` — wait-for-ready + pull model; terminate is no-op
 - `"api"` — skip all lifecycle; inject `extra_request_headers()` (Bearer token) per request
 
+`needs_ollama_check = False` — provider handles its own readiness (e.g. `together_dedicated`); instance_manager skips `/api/tags` probe and model pull.
+
 `is_configured()` filters out providers with missing API keys at startup.
 
 `PROVIDER_PRIORITY` (comma list) controls order and which providers are active.
@@ -57,11 +60,22 @@ Pod provider prices synced from live RunPod GPU catalog at startup.
 
 `ChatMessage.content` accepts `str | list[ContentPart]` (OpenAI multimodal format). Use `msg.text_content()` anywhere plain text is needed (routing, token estimation, preprocessing).
 
-**Vision routing** (`bridge/router.py` step 0): requests containing `image_url` content parts are automatically routed to the `vision` tier (llava) before all other routing signals, unless the requested model already supports vision (gpt-4o, llava, gemini, etc.). If the vision pod is unavailable, behavior is controlled by `config/tiers.yaml` → `vision.fallback`:
-- `strip_images` (default) — strips image parts, continues with text only on the normal tier
+**Vision routing** (`bridge/router.py` step 0): requests containing `image_url` content parts are automatically routed to the `vision` tier before all other routing signals, unless the requested model already supports vision (`gpt-4o`, `llava`, `gemini`, `llama-3.2`, Qwen VL, etc.). If vision pod unavailable, `config/tiers.yaml` → `vision.fallback`:
+- `strip_images` (default) — drops image parts, continues on text tier
 - `error` — returns HTTP 400 `vision_not_supported`
 
-Three helpers in `bridge/router.py`: `has_image_content()`, `model_supports_vision()`, `strip_images_from_messages()`.
+**Together dedicated vision tiers** (3 quality levels via `providers/together_dedicated.py`):
+| Routing tier | Model | Hardware |
+|---|---|---|
+| `simple` | Qwen3-VL-8B-Instruct | L40 / L40S / A100-40GB |
+| `vision` | Llama-3.2-11B-Vision-Instruct-Turbo | L40 / L40S / A100 |
+| `architecture` / `maximum` / `ultra` | Llama-3.2-90B-Vision-Instruct-Turbo | A100-80GB / H100 |
+
+Together dedicated endpoints = reserved GPU (hourly billing). Bridge creates endpoint, waits for RUNNING, routes inference through standard Together API. Endpoint terminated on idle.
+
+**API vision payloads**: `_sanitize_messages_for_api_vision()` in `main.py` strips history, sends only `[system?, last_user_with_image]` to non-Ollama vision providers (Together/OpenAI). Prevents consecutive-user-message errors.
+
+Three helpers in `bridge/router.py`: `has_image_content()`, `model_supports_vision()`, `strip_images_from_messages()`. `_VISION_MODELS` set includes `llama-3.2`, `vision-instruct`, `qwen3-vl`, `qwen2.5-vl`, `qwen2-vl`.
 
 ## Pod Lifecycle (pod type only)
 

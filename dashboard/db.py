@@ -239,11 +239,13 @@ def get_requests_raw(
     days: int = 30,
     user_id: str | None = None,
     tier: str | None = None,
+    provider: str | None = None,
     limit: int = 10_000,
 ) -> list[dict]:
     q = (
-        select(Request, User.email)
+        select(Request, User.email, Pod.provider)
         .join(User)
+        .outerjoin(Pod, Request.pod_id == Pod.id)
         .where(
             Request.created_at >= text(f"NOW() - INTERVAL '{days} days'"),
         )
@@ -254,11 +256,14 @@ def get_requests_raw(
         q = q.where(Request.user_id == user_id)
     if tier:
         q = q.where(Request.tier == tier)
+    if provider:
+        q = q.where(Pod.provider == provider)
     rows = session.execute(q).all()
     return [
         {
             "id": r.id,
             "email": email,
+            "provider": pod_provider or "unknown",
             "tier": r.tier,
             "model": r.model,
             "pipeline": r.pipeline,
@@ -271,7 +276,7 @@ def get_requests_raw(
             "routing_reason": r.routing_reason,
             "created_at": r.created_at,
         }
-        for r, email in rows
+        for r, email, pod_provider in rows
     ]
 
 
@@ -280,24 +285,33 @@ def get_api_provider_stats(session: Session) -> list[dict]:
     q = text("""
         SELECT
             p.provider,
-            COUNT(r.id)                                    AS requests_today,
-            SUM(r.prompt_tokens + r.completion_tokens)     AS tokens_today,
-            SUM(r.cost_usd)::float                         AS cost_today,
-            SUM(SUM(r.cost_usd)) OVER (PARTITION BY p.provider)::float AS cost_month
+            COUNT(r.id) FILTER (
+                WHERE r.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
+            ) AS requests_today,
+            COALESCE(SUM(r.prompt_tokens + r.completion_tokens) FILTER (
+                WHERE r.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
+            ), 0) AS tokens_today,
+            COALESCE(SUM(r.cost_usd) FILTER (
+                WHERE r.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
+            ), 0)::float AS cost_today,
+            COALESCE(SUM(r.cost_usd), 0)::float AS cost_month,
+            COUNT(r.id) AS requests_month
         FROM requests r
         JOIN pods p ON p.id = r.pod_id
         WHERE r.status = 'ok'
           AND p.provider NOT IN ('runpod', 'vast', 'lambda', 'local', 'mock')
-          AND r.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
+          AND r.created_at >= DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')
         GROUP BY p.provider
     """)
     rows = session.execute(q).fetchall()
     return [
         {
             "provider": r.provider,
-            "requests_today": int(r.requests_today),
+            "requests_today": int(r.requests_today or 0),
             "tokens_today": int(r.tokens_today or 0),
             "cost_today": float(r.cost_today or 0),
+            "cost_month": float(r.cost_month or 0),
+            "requests_month": int(r.requests_month or 0),
         }
         for r in rows
     ]

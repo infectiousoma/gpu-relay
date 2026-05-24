@@ -267,7 +267,9 @@ def get_tiers() -> dict:
 # ---------------------------------------------------------------------------
 
 _VISION_MODELS = {"llava", "bakllava", "moondream", "llava-llama3", "minicpm-v",
-                  "gpt-4o", "gpt-4-vision", "claude-3", "gemini"}
+                  "gpt-4o", "gpt-4-vision", "claude-3", "gemini",
+                  "llama-3.2", "vision-instruct",
+                  "qwen3-vl", "qwen2.5-vl", "qwen2-vl"}
 
 
 def has_image_content(messages: list) -> bool:
