@@ -20,6 +20,9 @@ _ALL_PROVIDERS = ["openai", "groq", "together", "together_dedicated", "mistral",
 def render() -> None:
     st.title("⚙️ Settings")
 
+    if msg := st.session_state.pop("settings_flash", None):
+        st.success(msg)
+
     user_id = st.session_state.get("user_id")
     if not user_id:
         st.error("Not logged in.")
@@ -64,7 +67,7 @@ def render() -> None:
         save_tiers = None if all_checked else selected_tiers
         with db_session() as session:
             update_user_preferences(session, user_id, save_tiers, current_disabled or None)
-        st.success("Tier preferences saved.")
+        st.session_state["settings_flash"] = "Tier preferences saved."
         st.rerun()
 
     st.divider()
@@ -92,7 +95,7 @@ def render() -> None:
     if st.button("Save provider preferences", type="primary", key="save_providers"):
         with db_session() as session:
             update_user_preferences(session, user_id, current_preferred or None, disabled_providers or None)
-        st.success("Provider preferences saved.")
+        st.session_state["settings_flash"] = "Provider preferences saved."
         st.rerun()
 
     st.divider()
@@ -133,7 +136,7 @@ def render() -> None:
                     encrypted = encrypt_provider_key(new_key.strip())
                     with db_session() as session:
                         upsert_user_provider_key(session, user_id, provider, encrypted)
-                    st.success(f"{provider.title()} key saved.")
+                    st.session_state["settings_flash"] = f"{provider.title()} key saved."
                     st.rerun()
                 elif save_pressed and not new_key.strip():
                     st.warning("Enter a key to save.")
@@ -141,5 +144,5 @@ def render() -> None:
                 if delete_pressed:
                     with db_session() as session:
                         delete_user_provider_key(session, user_id, provider)
-                    st.success(f"{provider.title()} key removed.")
+                    st.session_state["settings_flash"] = f"{provider.title()} key removed."
                     st.rerun()
