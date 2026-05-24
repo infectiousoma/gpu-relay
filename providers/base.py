@@ -88,14 +88,12 @@ TIER_GPU_PREFERENCE: dict[str, list[str]] = {
 }
 
 # Ollama model tag per tier
-# TODO (vision/RunPod): change TIER_MODEL["vision"] to "llava:34b" once a RunPod
-#      template with the llava:34b image is created and RUNPOD_TEMPLATE_ID is set.
 TIER_MODEL: dict[str, str] = {
     "simple":       "qwen2.5-coder:7b-instruct-q4_K_M",
     "architecture": "qwen2.5-coder:32b-instruct-q4_K_M",
     "maximum":      "deepseek-v3:latest-q4_K_M",
     "ultra":        "qwen2.5:72b-instruct-q4_K_M",
-    "vision":       "minicpm-v",
+    "vision":       "llava:13b",
 }
 
 OLLAMA_PORT = 11434
