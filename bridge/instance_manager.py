@@ -46,6 +46,7 @@ class InstanceManager:
         self._lock: asyncio.Lock = asyncio.Lock()
         self._providers: dict[str, "BaseProvider"] = {}
         self._active_requests: dict[str, int] = {}  # pod_id → count
+        self._spinning_tiers: set[str] = set()  # tiers currently being launched
         self._reaper_task: asyncio.Task | None = None
         self._health_task: asyncio.Task | None = None
 
@@ -112,55 +113,82 @@ class InstanceManager:
         provider_override: str | None = None,
         disabled_providers: list[str] | None = None,
         provider_order: list[str] | None = None,
+        user_label: str | None = None,
     ) -> PodHandle:
         """Return a ready PodHandle; spins a new pod if none available.
 
         provider_override: if set (from X-Provider header), try this provider first.
         disabled_providers: per-user list of providers to skip.
         provider_order: user's preferred provider order; listed providers bubble to front.
+        user_label: short label (email prefix) appended to provider pod names for visibility.
         """
         _disabled = set(disabled_providers or [])
 
+        # Fast path: existing ready pod
         async with SessionLocal() as session:
             pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
             if pod:
                 return self._handle(pod, cold_start=False)
 
-        # No ready pod — try providers in priority order
+        # Under lock: re-check, then claim spin rights or wait for in-progress launch
+        async with self._lock:
+            async with SessionLocal() as session:
+                pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
+                if pod:
+                    return self._handle(pod, cold_start=False)
+            already_spinning = tier in self._spinning_tiers
+            if not already_spinning:
+                self._spinning_tiers.add(tier)
+
+        if already_spinning:
+            # Another coroutine is launching this tier — wait for it to become ready
+            deadline = asyncio.get_event_loop().time() + settings.cold_start_timeout_sec + 120
+            while asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(5)
+                async with SessionLocal() as session:
+                    pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
+                    if pod:
+                        return self._handle(pod, cold_start=False)
+            raise RuntimeError(f"Timed out waiting for in-progress pod for tier={tier}")
+
+        # No ready pod, no duplicate spin — try providers in priority order
         last_error: Exception | None = None
-        if settings.mock_providers:
-            priority = ["mock"]
-        else:
-            from bridge.router import get_tiers
-            _overrides = get_tiers().get(tier, {}).get("provider_overrides") or []
-            priority = _overrides if _overrides else settings.provider_priority_list
+        try:
+            if settings.mock_providers:
+                priority = ["mock"]
+            else:
+                from bridge.router import get_tiers
+                _overrides = get_tiers().get(tier, {}).get("provider_overrides") or []
+                priority = _overrides if _overrides else settings.provider_priority_list
 
-        # Apply user's custom provider order (listed providers bubble to front)
-        if provider_order:
-            front = [p for p in provider_order if p in priority]
-            rest = [p for p in priority if p not in provider_order]
-            priority = front + rest
+            # Apply user's custom provider order (listed providers bubble to front)
+            if provider_order:
+                front = [p for p in provider_order if p in priority]
+                rest = [p for p in priority if p not in provider_order]
+                priority = front + rest
 
-        # Per-request override: bubble requested provider to front
-        if provider_override and provider_override in self._providers:
-            priority = [provider_override] + [p for p in priority if p != provider_override]
+            # Per-request override: bubble requested provider to front
+            if provider_override and provider_override in self._providers:
+                priority = [provider_override] + [p for p in priority if p != provider_override]
 
-        # Filter out providers the user has disabled
-        if _disabled:
-            priority = [p for p in priority if p not in _disabled]
+            # Filter out providers the user has disabled
+            if _disabled:
+                priority = [p for p in priority if p not in _disabled]
 
-        for provider_name in priority:
-            provider = self._providers.get(provider_name)
-            if provider is None:
-                continue
-            try:
-                pod_handle = await self._spin_pod(tier, provider_name, provider)
-                return pod_handle
-            except Exception as exc:
-                log.warning("provider_failed", provider=provider_name, tier=tier, error=str(exc))
-                last_error = exc
+            for provider_name in priority:
+                provider = self._providers.get(provider_name)
+                if provider is None:
+                    continue
+                try:
+                    pod_handle = await self._spin_pod(tier, provider_name, provider, user_label=user_label)
+                    return pod_handle
+                except Exception as exc:
+                    log.warning("provider_failed", provider=provider_name, tier=tier, error=str(exc))
+                    last_error = exc
 
-        raise RuntimeError(f"All providers failed for tier={tier}: {last_error}") from last_error
+            raise RuntimeError(f"All providers failed for tier={tier}: {last_error}") from last_error
+        finally:
+            self._spinning_tiers.discard(tier)
 
     def mark_active(self, pod_id: str) -> None:
         self._active_requests[pod_id] = self._active_requests.get(pod_id, 0) + 1
@@ -185,7 +213,7 @@ class InstanceManager:
         result = await session.execute(q.limit(1))
         return result.scalar_one_or_none()
 
-    async def _spin_pod(self, tier: str, provider_name: str, provider: "BaseProvider") -> PodHandle:
+    async def _spin_pod(self, tier: str, provider_name: str, provider: "BaseProvider", user_label: str | None = None) -> PodHandle:
         # API providers are stateless — upsert the single canonical row per (provider, tier).
         if getattr(provider, "provider_type", "") == "api":
             return await self._spin_api_pod(tier, provider_name, provider)
@@ -208,7 +236,7 @@ class InstanceManager:
             await session.commit()
 
         try:
-            info = await provider.launch(tier)
+            info = await provider.launch(tier, user_label=user_label)
         except Exception:
             async with SessionLocal() as session:
                 pod = await session.get(Pod, pod_id)

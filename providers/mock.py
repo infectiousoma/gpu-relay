@@ -18,7 +18,7 @@ class MockProvider(BaseProvider):
     def __init__(self) -> None:
         self._ollama_url = os.getenv("OLLAMA_LOCAL_URL", "http://ollama:11434")
 
-    async def launch(self, tier: str) -> PodInfo:
+    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
         return PodInfo(
             external_id=f"mock-{uuid.uuid4().hex[:8]}",
             provider="mock",

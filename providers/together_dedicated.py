@@ -108,7 +108,7 @@ class TogetherDedicatedProvider(BaseProvider):
     # Public API
     # ------------------------------------------------------------------
 
-    async def launch(self, tier: str) -> PodInfo:
+    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
         global _capacity_miss_at
         cooldown_remaining = _capacity_miss_at + _CAPACITY_COOLDOWN_SEC - time.monotonic()
         if cooldown_remaining > 0:

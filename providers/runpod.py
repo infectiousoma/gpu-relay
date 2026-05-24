@@ -95,7 +95,7 @@ class RunPodProvider(BaseProvider):
     # Public API
     # ------------------------------------------------------------------
 
-    async def launch(self, tier: str) -> PodInfo:
+    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
         if not self._api_key:
             raise ProviderError("RUNPOD_API_KEY not set", retryable=False)
 
@@ -135,7 +135,7 @@ class RunPodProvider(BaseProvider):
                 "imageName": "ollama/ollama:latest",
                 "env": env,
                 "ports": "11434/http",
-                "name": f"llm-{tier}",
+                "name": f"llm-{tier}-{user_label}" if user_label else f"llm-{tier}",
                 "supportPublicIp": True,
             }
             if volume_id:

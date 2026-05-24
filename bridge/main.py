@@ -253,7 +253,8 @@ async def chat_completions(
         _disabled = list({*_disabled, "local"})
     _provider_order = list(user.provider_order or [])
     try:
-        pod = await manager.acquire(decision.tier, provider_override=provider_override, disabled_providers=_disabled, provider_order=_provider_order or None)
+        _user_label = user.email.split("@")[0][:20] if user.email else None
+        pod = await manager.acquire(decision.tier, provider_override=provider_override, disabled_providers=_disabled, provider_order=_provider_order or None, user_label=_user_label)
         await _apply_user_provider_key(pod, user.id, session)
     except Exception as exc:
         log.error("acquire_failed", tier=decision.tier, error=str(exc))

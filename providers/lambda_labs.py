@@ -120,7 +120,7 @@ class LambdaProvider(BaseProvider):
         wait=wait_exponential(multiplier=2, min=4, max=60),
         reraise=True,
     )
-    async def launch(self, tier: str) -> PodInfo:
+    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
         if not self._api_key:
             raise ProviderError("LAMBDA_API_KEY not set", retryable=False)
 

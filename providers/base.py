@@ -128,7 +128,7 @@ class BaseProvider(ABC):
         return {}
 
     @abstractmethod
-    async def launch(self, tier: str) -> PodInfo:
+    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
         """Provision a new pod for *tier*.  Block until endpoint_url is assigned."""
         ...
 

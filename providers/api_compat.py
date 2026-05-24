@@ -51,7 +51,7 @@ class OpenAICompatProvider(BaseProvider):
     def _model_for(self, tier: str) -> str:
         return self._default_models.get(tier, self._default_models.get("simple", ""))
 
-    async def launch(self, tier: str) -> PodInfo:
+    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
         model = self._model_for(tier)
         log.info("api_provider_launch", provider=self.name, tier=tier, model=model)
         return PodInfo(
