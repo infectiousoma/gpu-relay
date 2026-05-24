@@ -109,7 +109,7 @@ class GroqProvider(OpenAICompatProvider):
     name = "groq"
     _base_url = "https://api.groq.com/openai"
     _default_models = {
-        "vision":       "llama-3.2-90b-vision-preview",
+        "vision":       "meta-llama/llama-4-scout-17b-16e-instruct",
         "simple":       "llama-3.1-8b-instant",
         "architecture": "llama-3.3-70b-versatile",
         "maximum":      "llama-3.3-70b-versatile",
