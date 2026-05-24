@@ -74,7 +74,7 @@ def _together_balance() -> dict | None:
     if not api_key:
         return None
     # Together has no public balance API — check https://api.together.ai/settings/billing
-    return {"provider": "together", "balance": None, "note": "Check api.together.ai/settings/billing"}
+    return {"provider": "Together AI", "balance": None, "note": "Check api.together.ai/settings/billing"}
 
 
 def _groq_balance() -> dict | None:
