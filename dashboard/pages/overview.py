@@ -75,7 +75,12 @@ def render() -> None:
                 elif b.get("error"):
                     col.metric(b["provider"], "⚠ Error", delta=b["error"][:60])
                 elif b.get("note"):
-                    col.metric(b["provider"], "✓ configured", delta=b["note"])
+                    note = b["note"]
+                    col.metric(b["provider"], "✓ configured")
+                    if note.startswith("http") or "." in note.split("/")[0]:
+                        col.caption(f"[{note}]({note if note.startswith('http') else 'https://' + note})")
+                    else:
+                        col.caption(note)
                 else:
                     bal = b.get("balance")
                     val = format_usd(bal) if bal is not None else "✓ configured"
