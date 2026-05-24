@@ -36,6 +36,7 @@ def render() -> None:
         admin_ceiling = user.allowed_tiers  # None = all tiers allowed
         current_preferred = user.preferred_tiers or []
         current_disabled = user.disabled_providers or []
+        current_provider_order = user.provider_order or []
 
     try:
         from bridge.router import get_tiers
@@ -73,28 +74,38 @@ def render() -> None:
     st.divider()
 
     # ----------------------------------------------------------------
-    # Section 2: Provider toggles
+    # Section 2: Provider order + toggles
     # ----------------------------------------------------------------
     st.subheader("Provider Preferences")
     st.caption(
-        "Disable providers you don't want used for your requests. "
-        "Disabling a provider never affects other users."
+        "Set your provider priority order and disable providers you never want used. "
+        "Changes affect only your requests."
     )
 
-    provider_selections = {}
-    pcols = st.columns(max(len(_ALL_PROVIDERS), 1))
-    for col, provider in zip(pcols, _ALL_PROVIDERS):
-        provider_selections[provider] = col.checkbox(
-            provider,
-            value=(provider not in current_disabled),
-            key=f"prov_{provider}",
-        )
+    # Build default ordered list: current_provider_order first, then remaining
+    ordered_first = [p for p in current_provider_order if p in _ALL_PROVIDERS]
+    remaining = [p for p in _ALL_PROVIDERS if p not in ordered_first]
+    default_order = ordered_first + remaining
 
-    disabled_providers = [p for p, enabled in provider_selections.items() if not enabled]
+    st.caption("**Priority order** — select providers in the order you want them tried (first = highest priority). Unselected providers are disabled.")
+    selected_ordered = st.multiselect(
+        "Provider order",
+        options=_ALL_PROVIDERS,
+        default=default_order if current_provider_order else [p for p in _ALL_PROVIDERS if p not in current_disabled],
+        key="prov_order",
+        label_visibility="collapsed",
+    )
+
+    disabled_providers = [p for p in _ALL_PROVIDERS if p not in selected_ordered]
 
     if st.button("Save provider preferences", type="primary", key="save_providers"):
         with db_session() as session:
-            update_user_preferences(session, user_id, current_preferred or None, disabled_providers or None)
+            update_user_preferences(
+                session, user_id,
+                current_preferred or None,
+                disabled_providers or None,
+                selected_ordered if selected_ordered != _ALL_PROVIDERS else None,
+            )
         st.session_state["settings_flash"] = "Provider preferences saved."
         st.rerun()
 

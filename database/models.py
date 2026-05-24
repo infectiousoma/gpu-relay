@@ -121,6 +121,8 @@ class User(Base):
     preferred_tiers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
     # providers user has disabled for their requests; null = use all
     disabled_providers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
+    # user's preferred provider order; null = use tier defaults
+    provider_order: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")

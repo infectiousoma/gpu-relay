@@ -111,11 +111,13 @@ class InstanceManager:
         tier: str,
         provider_override: str | None = None,
         disabled_providers: list[str] | None = None,
+        provider_order: list[str] | None = None,
     ) -> PodHandle:
         """Return a ready PodHandle; spins a new pod if none available.
 
         provider_override: if set (from X-Provider header), try this provider first.
         disabled_providers: per-user list of providers to skip.
+        provider_order: user's preferred provider order; listed providers bubble to front.
         """
         async with SessionLocal() as session:
             pod = await self._get_ready_pod(tier, session, provider=provider_override)
@@ -132,6 +134,12 @@ class InstanceManager:
             from bridge.router import get_tiers
             _overrides = get_tiers().get(tier, {}).get("provider_overrides") or []
             priority = _overrides if _overrides else settings.provider_priority_list
+
+        # Apply user's custom provider order (listed providers bubble to front)
+        if provider_order:
+            front = [p for p in provider_order if p in priority]
+            rest = [p for p in priority if p not in provider_order]
+            priority = front + rest
 
         # Per-request override: bubble requested provider to front
         if provider_override and provider_override in self._providers:

@@ -7,7 +7,7 @@ tiers:
   vision:
     gpu: RTX_4090
     model: minicpm-v
-    provider_overrides: [local, together_dedicated, groq, runpod, vast, lambda]
+    provider_overrides: [local, runpod, vast, lambda, groq, together_dedicated]
     vram_gb: 10
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 300
@@ -32,7 +32,7 @@ tiers:
   simple:
     gpu: RTX_4090
     model: qwen2.5-coder:7b-instruct-q4_K_M
-    provider_overrides: [local, openai, groq, together, mistral, deepseek, runpod, vast, lambda]
+    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
     vram_gb: 4
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 300
@@ -55,7 +55,7 @@ tiers:
   architecture:
     gpu: RTX_4090
     model: qwen2.5-coder:32b-instruct-q4_K_M
-    provider_overrides: [local, openai, groq, together, mistral, deepseek, runpod, vast, lambda]
+    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
     vram_gb: 18
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 600
@@ -83,7 +83,7 @@ tiers:
   maximum:
     gpu: L40S
     model: deepseek-v3:latest-q4_K_M
-    provider_overrides: [local, openai, groq, together, mistral, deepseek, runpod, vast, lambda]
+    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
     vram_gb: 36
     cost_per_hour_usd: 1.14
     idle_timeout_sec: 600
@@ -111,7 +111,7 @@ tiers:
   ultra:
     gpu: A100_80GB
     model: qwen2.5:72b-instruct-q4_K_M
-    provider_overrides: [local, openai, groq, together, mistral, deepseek, runpod, vast, lambda]
+    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
     vram_gb: 48
     cost_per_hour_usd: 1.89
     idle_timeout_sec: 600

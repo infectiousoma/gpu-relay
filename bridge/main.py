@@ -247,8 +247,9 @@ async def chat_completions(
     # --- Acquire pod ---
     provider_override = request.headers.get("x-provider") or None
     _disabled = list(user.disabled_providers or [])
+    _provider_order = list(user.provider_order or [])
     try:
-        pod = await manager.acquire(decision.tier, provider_override=provider_override, disabled_providers=_disabled)
+        pod = await manager.acquire(decision.tier, provider_override=provider_override, disabled_providers=_disabled, provider_order=_provider_order or None)
         await _apply_user_provider_key(pod, user.id, session)
     except Exception as exc:
         log.error("acquire_failed", tier=decision.tier, error=str(exc))

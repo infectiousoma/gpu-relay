@@ -375,9 +375,11 @@ def update_user_preferences(
     user_id: str,
     preferred_tiers: list[str] | None,
     disabled_providers: list[str] | None,
+    provider_order: list[str] | None = None,
 ) -> None:
     user = session.get(User, user_id)
     if user:
         user.preferred_tiers = preferred_tiers or None
         user.disabled_providers = disabled_providers or None
+        user.provider_order = provider_order or None
         session.commit()
