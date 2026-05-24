@@ -19,7 +19,7 @@ log = structlog.get_logger(__name__)
 
 class LocalProvider(BaseProvider):
     name = "local"
-    provider_type = "local"
+    provider_type = "api"
 
     def is_configured(self) -> bool:
         return True
