@@ -34,6 +34,7 @@ class OpenAICompatProvider(BaseProvider):
     """Base for any OpenAI-compatible commercial API."""
 
     provider_type = "api"
+    needs_ollama_check = False
 
     _base_url: str = ""
     _default_models: dict[str, str] = {}
@@ -108,7 +109,7 @@ class GroqProvider(OpenAICompatProvider):
     name = "groq"
     _base_url = "https://api.groq.com/openai"
     _default_models = {
-        "vision":       "llama-3.2-11b-vision-preview",
+        "vision":       "llama-3.2-90b-vision-preview",
         "simple":       "llama-3.1-8b-instant",
         "architecture": "llama-3.3-70b-versatile",
         "maximum":      "llama-3.3-70b-versatile",
