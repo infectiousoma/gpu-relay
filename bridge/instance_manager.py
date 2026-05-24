@@ -86,6 +86,7 @@ class InstanceManager:
                 log.warning("no_providers_configured")
             else:
                 log.info("providers_configured", providers=list(self._providers))
+        await self._cleanup_stale_pods()
         await self._reset_api_provider_pods()
         await self._cleanup_dedicated_pods()
         self._reaper_task = asyncio.create_task(self._reaper_loop(), name="idle-reaper")
@@ -217,9 +218,12 @@ class InstanceManager:
         return result.scalar_one_or_none()
 
     async def _get_in_progress_pod(self, tier: str, session: AsyncSession, excluded_providers: set[str] | None = None) -> Pod | None:
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.cold_start_timeout_sec)
         q = select(Pod).where(
             Pod.tier == tier,
             Pod.status.in_([PodStatus.provisioning, PodStatus.starting]),
+            Pod.started_at >= cutoff,
         )
         if excluded_providers:
             q = q.where(Pod.provider.notin_(excluded_providers))
@@ -357,6 +361,23 @@ class InstanceManager:
             except Exception as exc:
                 log.warning("model_pull_failed", pod_id=pod_id, model=model, error=str(exc))
                 raise
+
+    async def _cleanup_stale_pods(self) -> None:
+        """On startup, mark provisioning/starting pods as failed.
+
+        These pods were mid-launch when the bridge last crashed or restarted.
+        Their launch coroutines are gone; they'll never become ready.
+        """
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Pod).where(Pod.status.in_([PodStatus.provisioning, PodStatus.starting]))
+            )
+            pods = result.scalars().all()
+            for pod in pods:
+                pod.status = PodStatus.failed
+            if pods:
+                await session.commit()
+                log.info("cleanup_stale_pods", count=len(pods))
 
     async def _reset_api_provider_pods(self) -> None:
         """Delete stale API provider pod rows on startup so they're recreated with fresh config.
