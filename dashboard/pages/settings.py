@@ -82,16 +82,18 @@ def render() -> None:
         "Changes affect only your requests."
     )
 
-    # Build default ordered list: current_provider_order first, then remaining
-    ordered_first = [p for p in current_provider_order if p in _ALL_PROVIDERS]
-    remaining = [p for p in _ALL_PROVIDERS if p not in ordered_first]
-    default_order = ordered_first + remaining
+    # Default: if user has saved an order, show only those (excluded = disabled).
+    # If no saved order, show all enabled (respecting current_disabled).
+    if current_provider_order:
+        default_selection = [p for p in current_provider_order if p in _ALL_PROVIDERS]
+    else:
+        default_selection = [p for p in _ALL_PROVIDERS if p not in current_disabled]
 
     st.caption("**Priority order** — select providers in the order you want them tried (first = highest priority). Unselected providers are disabled.")
     selected_ordered = st.multiselect(
         "Provider order",
         options=_ALL_PROVIDERS,
-        default=default_order if current_provider_order else [p for p in _ALL_PROVIDERS if p not in current_disabled],
+        default=default_selection,
         key="prov_order",
         label_visibility="collapsed",
     )
