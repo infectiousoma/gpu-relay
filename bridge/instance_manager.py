@@ -119,12 +119,12 @@ class InstanceManager:
         disabled_providers: per-user list of providers to skip.
         provider_order: user's preferred provider order; listed providers bubble to front.
         """
+        _disabled = set(disabled_providers or [])
+
         async with SessionLocal() as session:
-            pod = await self._get_ready_pod(tier, session, provider=provider_override)
+            pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
             if pod:
                 return self._handle(pod, cold_start=False)
-
-        _disabled = set(disabled_providers or [])
 
         # No ready pod — try providers in priority order
         last_error: Exception | None = None
@@ -176,10 +176,12 @@ class InstanceManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _get_ready_pod(self, tier: str, session: AsyncSession, provider: str | None = None) -> Pod | None:
+    async def _get_ready_pod(self, tier: str, session: AsyncSession, provider: str | None = None, excluded_providers: set[str] | None = None) -> Pod | None:
         q = select(Pod).where(Pod.tier == tier, Pod.status == PodStatus.ready)
         if provider:
             q = q.where(Pod.provider == provider)
+        if excluded_providers:
+            q = q.where(Pod.provider.notin_(excluded_providers))
         result = await session.execute(q.limit(1))
         return result.scalar_one_or_none()
 
