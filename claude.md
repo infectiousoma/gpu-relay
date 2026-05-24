@@ -73,6 +73,8 @@ Pod provider prices synced from live RunPod GPU catalog at startup.
 
 Together dedicated endpoints = reserved GPU (hourly billing). Bridge creates endpoint, waits for RUNNING, routes inference through standard Together API. Endpoint terminated on idle.
 
+**Capacity cooldown**: if all hardware options fail (Together has no capacity), bridge falls to RunPod instantly and skips Together for the next 10 min (`_CAPACITY_COOLDOWN_SEC = 600`). Cooldown resets on first successful launch. No proactive retry — only triggers on the next incoming request after cooldown expires.
+
 **API vision payloads**: `_sanitize_messages_for_api_vision()` in `main.py` strips history, sends only `[system?, last_user_with_image]` to non-Ollama vision providers (Together/OpenAI). Prevents consecutive-user-message errors.
 
 Three helpers in `bridge/router.py`: `has_image_content()`, `model_supports_vision()`, `strip_images_from_messages()`. `_VISION_MODELS` set includes `llama-3.2`, `vision-instruct`, `qwen3-vl`, `qwen2.5-vl`, `qwen2-vl`.

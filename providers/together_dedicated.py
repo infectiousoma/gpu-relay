@@ -19,6 +19,7 @@ skips the /api/tags Ollama probe and model pull for this provider.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 import structlog
@@ -30,6 +31,10 @@ log = structlog.get_logger(__name__)
 
 _API_BASE = "https://api.together.xyz/v1"
 _INFERENCE_BASE = "https://api.together.xyz"
+
+# After all hardware options fail, skip retries for this many seconds.
+_CAPACITY_COOLDOWN_SEC = 600  # 10 minutes
+_capacity_miss_at: float = 0.0  # module-level; shared across all launch() calls
 
 # Together hardware IDs (format: {count}x_{gpu_type}_{vram}gb_{link}) → (display, VRAM GB, cost $/hr)
 # Verified via GET /v1/hardware and create probes (2026-05).
@@ -50,12 +55,13 @@ _HARDWARE: dict[str, tuple[str, int, float]] = {
 _TIER_CONFIG: dict[str, tuple[list[str], str]] = {
     "simple": (
         ["1x_nvidia_l40_48gb_pcie", "1x_nvidia_l40s_48gb_pcie",
-         "1x_nvidia_a100_40gb_sxm"],
+         "1x_nvidia_a100_40gb_sxm", "1x_nvidia_a100_40gb_pcie"],
         "Qwen/Qwen3-VL-8B-Instruct",
     ),
     "vision": (
         ["1x_nvidia_l40_48gb_pcie", "1x_nvidia_l40s_48gb_pcie",
-         "1x_nvidia_a100_40gb_sxm", "1x_nvidia_a100_80gb_pcie"],
+         "1x_nvidia_a100_40gb_sxm", "1x_nvidia_a100_80gb_pcie",
+         "1x_nvidia_a100_40gb_pcie"],
         "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
     ),
     "architecture": (
@@ -103,6 +109,18 @@ class TogetherDedicatedProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def launch(self, tier: str) -> PodInfo:
+        global _capacity_miss_at
+        cooldown_remaining = _capacity_miss_at + _CAPACITY_COOLDOWN_SEC - time.monotonic()
+        if cooldown_remaining > 0:
+            log.info(
+                "together_dedicated_skipped_cooldown",
+                cooldown_remaining_sec=round(cooldown_remaining),
+            )
+            raise ProviderError(
+                f"Together: all hardware failed recently — cooldown {round(cooldown_remaining)}s remaining",
+                retryable=True,
+            )
+
         hw_list, model = _TIER_CONFIG.get(tier, _TIER_CONFIG["vision"])
 
         last_err: str = ""
@@ -140,6 +158,7 @@ class TogetherDedicatedProvider(BaseProvider):
                 # "hardware request not available" = capacity miss → try next
                 log.warning("together_dedicated_hw_unavailable", hardware=hw_id, error=err)
 
+        _capacity_miss_at = time.monotonic()
         raise ProviderError(
             f"Together: no hardware capacity for tier={tier}. Last: {last_err}",
             retryable=True,

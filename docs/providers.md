@@ -124,6 +124,8 @@ TOGETHER_API_KEY=<key>
 
 Hardware is tried in price order; capacity misses fall through to the next option. If Together has no capacity at all, bridge falls back to RunPod.
 
+**Capacity cooldown:** After all hardware options fail, Together is skipped for 10 minutes on subsequent requests — no wasted API calls, no delay before RunPod fallback. After the cooldown expires, the next request retries Together once. No proactive spinning — cooldown only activates on new incoming requests.
+
 **Cost:** Billed per hour by Together while the dedicated endpoint is `RUNNING` (~$1.49–$6.49/hr depending on GPU). No serverless per-token charge.
 
 ---
