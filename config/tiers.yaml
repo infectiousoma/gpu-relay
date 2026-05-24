@@ -7,7 +7,7 @@ tiers:
   vision:
     gpu: RTX_4090
     model: minicpm-v
-    provider_overrides: [local, together, together_dedicated, groq, runpod, vast, lambda]
+    provider_overrides: [local, together_dedicated, groq, runpod, vast, lambda]
     vram_gb: 10
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 300
