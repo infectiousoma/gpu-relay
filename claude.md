@@ -24,8 +24,8 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 - `providers/local.py` — routes to local Ollama, no pod lifecycle
 - `providers/api_compat.py` — OpenAI/Groq/Together/Mistral/DeepSeek pass-through
 - `providers/together_dedicated.py` — Together AI dedicated endpoint provider; spins up reserved GPU for vision models; `_TIER_CONFIG` maps tier → (hardware list, model)
-- `database/models.py` — User, Pod, Request, ApiKey, Invoice
-- `cli/llm_ctl.py` — admin CLI; run via `scripts/llmctl` wrapper (docker compose exec bridge python -m cli.llm_ctl)
+- `database/models.py` — User (preferred_tiers, disabled_providers, provider_order, allowed_tiers), Pod, Request, ApiKey, UserProviderKey (encrypted personal API keys), Invoice
+- `cli/llm_ctl.py` — admin CLI; **must run from project dir**: `docker compose exec bridge python -m cli.llm_ctl`; see `docs/cli.md`
 
 ## Tiers
 
@@ -60,7 +60,7 @@ Pod provider prices synced from live RunPod GPU catalog at startup.
 
 `ChatMessage.content` accepts `str | list[ContentPart]` (OpenAI multimodal format). Use `msg.text_content()` anywhere plain text is needed (routing, token estimation, preprocessing).
 
-**Vision routing** (`bridge/router.py` step 0): requests containing `image_url` content parts are automatically routed to the `vision` tier before all other routing signals, unless the requested model already supports vision (`gpt-4o`, `llava`, `gemini`, `llama-3.2`, Qwen VL, etc.). If vision pod unavailable, `config/tiers.yaml` → `vision.fallback`:
+**Vision routing** (`bridge/router.py` step 0): requests containing `image_url` content parts are automatically routed to the `vision` tier before all other routing signals, unless the requested model already supports vision (`gpt-4o`, `llava`, `gemini`, `llama-3.2`, `llama-4`, Qwen VL, etc.). If vision pod unavailable, `config/tiers.yaml` → `vision.fallback`:
 - `strip_images` (default) — drops image parts, continues on text tier
 - `error` — returns HTTP 400 `vision_not_supported`
 
@@ -77,7 +77,9 @@ Together dedicated endpoints = reserved GPU (hourly billing). Bridge creates end
 
 **API vision payloads**: `_sanitize_messages_for_api_vision()` in `main.py` strips history, sends only `[system?, last_user_with_image]` to non-Ollama vision providers (Together/OpenAI). Prevents consecutive-user-message errors.
 
-Three helpers in `bridge/router.py`: `has_image_content()`, `model_supports_vision()`, `strip_images_from_messages()`. `_VISION_MODELS` set includes `llama-3.2`, `vision-instruct`, `qwen3-vl`, `qwen2.5-vl`, `qwen2-vl`.
+Three helpers in `bridge/router.py`: `has_image_content()`, `model_supports_vision()`, `strip_images_from_messages()`. `_VISION_MODELS` set includes `llama-3.2`, `llama-4`, `vision-instruct`, `qwen3-vl`, `qwen2.5-vl`, `qwen2-vl`.
+
+**Groq vision model**: `meta-llama/llama-4-scout-17b-16e-instruct` (llama-3.2 vision models decommissioned 2026-05).
 
 ## Pod Lifecycle (pod type only)
 
@@ -127,6 +129,7 @@ OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 PIPELINE_DEFAULT=infer
 COLD_START_TIMEOUT_SEC=600
 MOCK_PROVIDERS=false                   # 1 = use local Ollama, skip all pod providers
+PROVIDER_KEY_SECRET=                   # required for personal API key encryption (generate: python3 -c "import secrets; print(secrets.token_hex(32))")
 ```
 
 ## DB Tables
@@ -134,6 +137,15 @@ MOCK_PROVIDERS=false                   # 1 = use local Ollama, skip all pod prov
 `users`, `api_keys`, `pods`, `requests`, `invoices`, `audit_log`
 
 API keys: SHA-256 hashed, plaintext shown once. Passwords: bcrypt.
+
+## User Preferences (dashboard Settings page)
+
+Users can configure per-request behavior without admin intervention:
+- **Tier preferences** — subset of allowed_tiers the router may use (e.g. skip `ultra` to save cost)
+- **Provider order + disable** — multiselect ordered list; selected = enabled in that priority order; unselected = disabled. Overrides tier `provider_overrides` for that user's requests.
+- **Personal API keys** — per-provider keys (groq, openai, together, mistral, deepseek) stored Fernet-encrypted in `user_provider_keys`. Bridge substitutes the user's key on outbound requests; requires `PROVIDER_KEY_SECRET` in `.env`.
+
+Admin ceiling (`allowed_tiers` via `llmctl users tiers`) always trumps user preferences.
 
 ## Multi-tenancy
 

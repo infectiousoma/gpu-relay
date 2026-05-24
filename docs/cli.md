@@ -1,14 +1,17 @@
 # CLI Reference
 
-Commands run inside the bridge container. Two equivalent forms:
+Commands run inside the bridge container. **Must run from the project directory** (`/mnt/nvme2/games/claude-code/self-host-llm`).
 
 ```bash
-# Always works — no setup required
-docker compose run --rm bridge python -m cli.llm_ctl <command>
+# Preferred — runs in the already-running bridge container
+cd /path/to/self-host-llm
+docker compose exec bridge python -m cli.llm_ctl <command>
 
-# Short form — requires one-time symlink install (see below)
-llmctl <command>
+# Alternative — spins up a fresh container (slower, same result)
+docker compose run --rm bridge python -m cli.llm_ctl <command>
 ```
+
+> **Note:** `docker compose run/exec` silently prints Docker daemon log lines starting with `time=...` to stderr — these are not errors. Only lines without that prefix are CLI output.
 
 ## Installing the `llmctl` shortcut (optional)
 
@@ -30,13 +33,15 @@ llmctl users add <email>                              # create user (prompts for
 llmctl users set-password <email>                     # reset password
 llmctl users budget <email> --usd 50                  # set monthly spend cap
 llmctl users credit-add <email> --usd 20              # add prepaid credit
-llmctl users tiers <email>                            # show allowed tiers
+llmctl users tiers <email>                            # show allowed tiers (admin ceiling)
 llmctl users tiers <email> --set simple               # lock to one tier
 llmctl users tiers <email> --set simple,architecture  # allow two tiers
-llmctl users tiers <email> --set all                  # remove restriction
+llmctl users tiers <email> --set all                  # remove restriction (allow all)
 llmctl users deactivate <email>                       # soft-delete user
 llmctl users list                                     # list all users
 ```
+
+> **Tier restriction vs user preference:** `users tiers` sets the **admin ceiling** — the maximum tiers a user may access. Users can further restrict their own routing via Settings → Tier Preferences in the dashboard. The admin ceiling always wins.
 
 ## API Keys
 
