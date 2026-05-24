@@ -77,8 +77,8 @@ def render() -> None:
                 elif b.get("note"):
                     note = b["note"]
                     col.metric(b["provider"], "✓ configured")
-                    if note.startswith("http") or "." in note.split("/")[0]:
-                        col.caption(f"[{note}]({note if note.startswith('http') else 'https://' + note})")
+                    if note.startswith("http"):
+                        col.caption(f"[billing dashboard]({note})")
                     else:
                         col.caption(note)
                 else:
