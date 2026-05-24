@@ -60,10 +60,6 @@ def render() -> None:
         {"provider": s["provider"].title(), "_api_stat": s}
         for s in api_stats
     ]
-    if is_admin:
-        with st.expander("🔍 Provider debug", expanded=not all_providers):
-            st.json({"balances": balances, "api_stats": api_stats})
-
     if all_providers:
         st.subheader("Providers")
         pcols = st.columns(max(len(all_providers), 1))

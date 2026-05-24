@@ -73,33 +73,8 @@ def _together_balance() -> dict | None:
     api_key = os.getenv("TOGETHER_API_KEY", "")
     if not api_key:
         return None
-    # Try multiple known Together endpoints for balance/user info
-    endpoints = [
-        "https://api.together.xyz/v1/users/me",
-        "https://api.together.xyz/v1/balance",
-    ]
-    for url in endpoints:
-        try:
-            r = httpx.get(
-                url,
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=_TIMEOUT,
-            )
-            if not r.is_success:
-                continue
-            data = r.json()
-            balance = (
-                data.get("credit_balance")
-                or data.get("balance")
-                or data.get("credits")
-                or data.get("total_credits")
-                or (data.get("user") or {}).get("credit_balance")
-            )
-            if balance is not None:
-                return {"provider": "together", "balance": float(balance), "currency": "USD"}
-        except Exception:
-            continue
-    return {"provider": "together", "balance": None, "note": "API configured — balance not available via API"}
+    # Together has no public balance API — check https://api.together.ai/settings/billing
+    return {"provider": "together", "balance": None, "note": "Check api.together.ai/settings/billing"}
 
 
 def _groq_balance() -> dict | None:
