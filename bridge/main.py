@@ -265,7 +265,7 @@ async def chat_completions(
                 body.messages = strip_images_from_messages(body.messages)
                 decision = await select_tier(body, user, request, monthly_spent)
                 try:
-                    pod = await manager.acquire(decision.tier)
+                    pod = await manager.acquire(decision.tier, user_label=_user_label)
                 except Exception as exc2:
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

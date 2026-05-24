@@ -144,6 +144,7 @@ def get_all_users_with_stats(session: Session) -> list[dict]:
             "allowed_tiers": u.allowed_tiers,       # None = unrestricted (admin ceiling)
             "preferred_tiers": u.preferred_tiers,   # user's own subset preference
             "disabled_providers": u.disabled_providers or [],
+            "allow_local": getattr(u, "allow_local", False),
             "max_tier": quota.max_tier if quota else "ultra",
             "rpm": quota.requests_per_minute if quota else 60,
             "tpd": quota.tokens_per_day if quota else 1_000_000,

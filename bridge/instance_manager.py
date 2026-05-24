@@ -130,18 +130,21 @@ class InstanceManager:
             if pod:
                 return self._handle(pod, cold_start=False)
 
-        # Under lock: re-check, then claim spin rights or wait for in-progress launch
+        # Under lock: re-check DB for ready or in-progress pod; claim spin rights if clear.
+        # DB check makes this cross-process safe (multiple uvicorn workers share the DB).
+        should_spin = False
         async with self._lock:
             async with SessionLocal() as session:
                 pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
                 if pod:
                     return self._handle(pod, cold_start=False)
-            already_spinning = tier in self._spinning_tiers
-            if not already_spinning:
+                in_progress = await self._get_in_progress_pod(tier, session, excluded_providers=_disabled or None)
+            if not in_progress and tier not in self._spinning_tiers:
                 self._spinning_tiers.add(tier)
+                should_spin = True
 
-        if already_spinning:
-            # Another coroutine is launching this tier — wait for it to become ready
+        if not should_spin:
+            # Another coroutine/process is already launching this tier — wait for ready
             deadline = asyncio.get_event_loop().time() + settings.cold_start_timeout_sec + 120
             while asyncio.get_event_loop().time() < deadline:
                 await asyncio.sleep(5)
@@ -151,7 +154,7 @@ class InstanceManager:
                         return self._handle(pod, cold_start=False)
             raise RuntimeError(f"Timed out waiting for in-progress pod for tier={tier}")
 
-        # No ready pod, no duplicate spin — try providers in priority order
+        # Claimed spin rights — try providers in priority order
         last_error: Exception | None = None
         try:
             if settings.mock_providers:
@@ -208,6 +211,16 @@ class InstanceManager:
         q = select(Pod).where(Pod.tier == tier, Pod.status == PodStatus.ready)
         if provider:
             q = q.where(Pod.provider == provider)
+        if excluded_providers:
+            q = q.where(Pod.provider.notin_(excluded_providers))
+        result = await session.execute(q.limit(1))
+        return result.scalar_one_or_none()
+
+    async def _get_in_progress_pod(self, tier: str, session: AsyncSession, excluded_providers: set[str] | None = None) -> Pod | None:
+        q = select(Pod).where(
+            Pod.tier == tier,
+            Pod.status.in_([PodStatus.provisioning, PodStatus.starting]),
+        )
         if excluded_providers:
             q = q.where(Pod.provider.notin_(excluded_providers))
         result = await session.execute(q.limit(1))
