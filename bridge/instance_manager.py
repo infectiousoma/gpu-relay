@@ -1,10 +1,41 @@
 """GPU pod pool manager.
 
+Pod lifecycle — one independent lifecycle per pod_type (vision, simple, architecture, etc.):
+
+  [request: tier=T]
+       │
+       ▼
+  _get_lock("T")           ← per-type lock; vision never blocks simple, etc.
+       │
+       ▼
+  DB: ready pod? ──────────yes──────────────────────────────► return handle
+       │ no                                                    (_pods[T] = pod_id)
+       ▼
+  in-progress pod? ──yes──► poll DB every 5s ──► pod.ready ──► return handle
+       │ no
+       ▼
+  _spinning_tiers.add("T")
+       │
+       ▼
+  provider.launch(T)
+       │
+  provisioning ──► starting ──► ready ──► mark_active() / inference / release()
+                                  │                               │
+                              _pods[T] = pod_id          last_used_at = now
+                                                                  │
+                                                        idle_reaper (per-tier timeout)
+                                                                  │
+                                                             terminated
+                                                        _pods.pop(T, None)
+
+  Pod types are fully decoupled: vision pod spins/terminates independently of simple.
+  Each type has: its own _get_lock(), its own _spinning_tiers entry, its own idle timeout.
+
 State machine per pod:
-  provisioning → starting → ready ⟷ draining → terminated | failed
+  provisioning → starting → ready → terminated | failed
 
 Pool logic:
-  - One pod per (provider, tier) kept warm while last_used + idle_timeout > now.
+  - One pod per tier kept warm while last_used + idle_timeout > now.
   - acquire(tier): return ready pod or spin a new one.
   - release(pod): update last_used; pool reaper decides termination.
   - Health loop: GET /api/tags every health_check_interval_sec;
@@ -43,12 +74,18 @@ class InstanceManager:
     """Singleton accessed via app.state.instance_manager."""
 
     def __init__(self) -> None:
-        self._lock: asyncio.Lock = asyncio.Lock()
+        self._locks: dict[str, asyncio.Lock] = {}  # keyed by pod_type/tier
+        self._pods: dict[str, str] = {}  # pod_type → pod_id of current active pod
         self._providers: dict[str, "BaseProvider"] = {}
         self._active_requests: dict[str, int] = {}  # pod_id → count
         self._spinning_tiers: set[str] = set()  # tiers currently being launched
         self._reaper_task: asyncio.Task | None = None
         self._health_task: asyncio.Task | None = None
+
+    def _get_lock(self, pod_type: str) -> asyncio.Lock:
+        if pod_type not in self._locks:
+            self._locks[pod_type] = asyncio.Lock()
+        return self._locks[pod_type]
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -129,15 +166,17 @@ class InstanceManager:
         async with SessionLocal() as session:
             pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
             if pod:
+                self._pods[tier] = pod.id
                 return self._handle(pod, cold_start=False)
 
-        # Under lock: re-check DB for ready or in-progress pod; claim spin rights if clear.
+        # Under tier-specific lock: re-check DB for ready or in-progress pod; claim spin rights if clear.
         # DB check makes this cross-process safe (multiple uvicorn workers share the DB).
         should_spin = False
-        async with self._lock:
+        async with self._get_lock(tier):
             async with SessionLocal() as session:
                 pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
                 if pod:
+                    self._pods[tier] = pod.id
                     return self._handle(pod, cold_start=False)
                 in_progress = await self._get_in_progress_pod(tier, session, excluded_providers=_disabled or None)
             if not in_progress and tier not in self._spinning_tiers:
@@ -152,6 +191,7 @@ class InstanceManager:
                 async with SessionLocal() as session:
                     pod = await self._get_ready_pod(tier, session, provider=provider_override, excluded_providers=_disabled or None)
                     if pod:
+                        self._pods[tier] = pod.id
                         return self._handle(pod, cold_start=False)
             raise RuntimeError(f"Timed out waiting for in-progress pod for tier={tier}")
 
@@ -185,6 +225,7 @@ class InstanceManager:
                     continue
                 try:
                     pod_handle = await self._spin_pod(tier, provider_name, provider, user_label=user_label)
+                    self._pods[tier] = pod_handle.pod_id
                     return pod_handle
                 except Exception as exc:
                     log.warning("provider_failed", provider=provider_name, tier=tier, error=str(exc))
@@ -499,6 +540,8 @@ class InstanceManager:
                             if p.health_failures >= threshold:
                                 log.error("pod_health_failed", pod_id=pod.id, failures=p.health_failures)
                                 p.status = PodStatus.failed
+                                if self._pods.get(p.tier) == p.id:
+                                    self._pods.pop(p.tier, None)
                                 provider = self._providers.get(pod.provider)
                                 if provider and provider.provider_type == "pod":
                                     asyncio.create_task(provider.terminate(pod.external_id))
@@ -545,6 +588,8 @@ class InstanceManager:
                                 await session.commit()
                                 terminated = True
                         if terminated:
+                            if self._pods.get(pod.tier) == pod.id:
+                                self._pods.pop(pod.tier, None)
                             provider = self._providers.get(pod.provider)
                             if provider and provider.provider_type == "pod":
                                 asyncio.create_task(provider.terminate(pod.external_id))

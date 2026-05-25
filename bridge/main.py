@@ -46,7 +46,7 @@ from bridge.cost_tracker import estimate_cost, record_request
 from bridge.instance_manager import InstanceManager, get_manager
 from bridge.multi_model import WORKFLOW_MODELS, WorkflowOrchestrator, run_pipeline, run_postprocess
 from bridge.quota import check_daily_tokens, check_monthly_budget, check_rpm
-from bridge.router import get_tiers, has_image_content, model_supports_vision, select_tier, strip_images_from_messages
+from bridge.router import get_tiers, has_image_content, model_supports_vision, requires_non_vision_model, select_tier, strip_images_from_messages
 from bridge.schemas import (
     ApiKeyResponse,
     BridgeMeta,
@@ -260,7 +260,7 @@ async def chat_completions(
         log.error("acquire_failed", tier=decision.tier, error=str(exc))
         if decision.tier == "vision":
             fallback = get_tiers().get("vision", {}).get("fallback", "error")
-            if fallback == "strip_images":
+            if fallback == "strip_images" and requires_non_vision_model(body):
                 log.warning("vision_pod_unavailable_stripping_images", error=str(exc))
                 body.messages = strip_images_from_messages(body.messages)
                 decision = await select_tier(body, user, request, monthly_spent)

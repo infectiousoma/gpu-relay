@@ -169,15 +169,17 @@ async def select_tier(
     files = request.files_referenced or 0
     allowed = _allowed_tiers(user)
 
-    # 0. Vision routing — image content always routes to vision tier before other signals
-    if has_image_content(request.messages) and not model_supports_vision(model_field):
+    # 0. Vision routing — pure image requests route ONLY to the vision tier; never fall through.
+    if has_image_content(request.messages) and not requires_non_vision_model(request):
         vision_cfg = _TIERS.get("vision")
         if vision_cfg and (not allowed or "vision" in allowed):
             cost = _projected_cost("vision", prompt_tokens)
             log.info("tier_vision_routing", original_model=model_field)
             return RoutingDecision(tier="vision", reason="vision_content_detected", projected_cost_usd=cost)
-        # Vision tier not configured or user lacks access — fall through to normal routing;
-        # main.py strips images on pod acquisition failure per the vision tier's fallback setting.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vision tier is not available for this user or configuration.",
+        )
 
     # 1. Explicit override
     override = (
@@ -276,6 +278,11 @@ _VISION_MODELS = {"llava", "bakllava", "moondream", "llava-llama3", "minicpm-v",
                   "gpt-4o", "gpt-4-vision", "claude-3", "gemini",
                   "llama-3.2", "llama-4", "vision-instruct",
                   "qwen3-vl", "qwen2.5-vl", "qwen2-vl"}
+
+
+def requires_non_vision_model(request: ChatCompletionRequest) -> bool:
+    """Returns True only if a non-vision model is explicitly needed after vision processing."""
+    return bool(getattr(request, 'downstream_model', None))
 
 
 def has_image_content(messages: list) -> bool:

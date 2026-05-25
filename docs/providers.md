@@ -43,14 +43,29 @@ Cold starts pull the Docker image + model on first use:
 Without a network volume, models re-download on every cold start.
 
 1. Verify the stack works without a volume first
-2. RunPod dashboard → Storage → Network Volumes → create 100 GB (same datacenter as pods)
-3. Copy the volume ID
-4. Add to `.env`: `RUNPOD_NETWORK_VOLUME_ID=<id>`
-5. Restart bridge: `docker compose up -d bridge`
+2. **Choose a datacenter** — see note below before creating the volume
+3. RunPod dashboard → Storage → Network Volumes → create 100 GB in that datacenter
+4. Copy the volume ID
+5. Add to `.env`: `RUNPOD_NETWORK_VOLUME_ID=<id>`
+6. Restart bridge: `docker compose up -d bridge`
 
 Cost: ~$7–8/month. Cuts cold starts from minutes to ~30 s.
 
 > **Warning:** If you delete the volume, clear `RUNPOD_NETWORK_VOLUME_ID` from `.env`. A stale ID causes every launch to fail.
+
+#### Datacenter selection
+
+RunPod pods launch in whichever datacenter has capacity for the requested GPU type — no datacenter is pinned in the launch request. When `RUNPOD_NETWORK_VOLUME_ID` is set, RunPod **constrains every pod to the same datacenter as the volume**. There is no cross-datacenter fallback: if that datacenter runs out of your target GPU type, all launches fail until capacity returns.
+
+Choose a datacenter that has:
+- Reliable availability of your tiers' preferred GPU (RTX 4090 for `simple`/`architecture`, L40S for `maximum`, A100 80GB for `ultra`)
+- Network volume storage support (not all RunPod datacenters offer it — the volume creation UI only shows eligible DCs)
+
+Before creating the volume, check RunPod's GPU availability table filtered to each datacenter, and prefer one that consistently shows stock across your target GPU types rather than the cheapest current price.
+
+### Pod type concurrency
+
+Each pod type (`vision`, `simple`, `architecture`, etc.) has an independent lifecycle: its own lock, its own idle timer, and its own spin-up/spin-down state. A vision pod spinning up or warming down never blocks a `simple` pod from acquiring, and vice versa. Multiple pod types can run simultaneously with no global serialisation.
 
 ---
 
@@ -95,7 +110,7 @@ OPENAI_MODEL_ARCHITECTURE=o1-mini
 
 > **Note:** Anthropic (Claude) uses a different wire format and is not yet supported.
 
-**Multimodal (images)**: Requests containing `image_url` content parts are automatically routed to the `vision` tier (LLaVA) before any other routing logic. If the requested model already supports vision (`gpt-4o`, `llava`, `gemini`, etc.) the request passes through unchanged. If no vision pod is available, behavior depends on `config/tiers.yaml` → `vision.fallback` (`strip_images` or `error`). See [tiers.md](tiers.md#auto-routing-logic) for details.
+**Multimodal (images)**: Requests containing `image_url` content parts are automatically routed to the `vision` tier before any other routing logic — this is a hard stop, not a hint. Pure image requests never fall through to a non-vision pod. If the vision tier is unavailable for the user or configuration, the request fails immediately with HTTP 503. If a vision pod is acquired but then fails, the request returns HTTP 400 — images are not stripped and re-routed to a text model unless the request explicitly sets `downstream_model` (pipeline use). See [tiers.md](tiers.md#auto-routing-logic) for details.
 
 ---
 

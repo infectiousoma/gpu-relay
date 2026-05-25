@@ -62,7 +62,7 @@ Same Ollama models as pod providers. Zero cost — budget gate skipped.
 
 When using `llm-auto`, the router picks a tier based on (priority order):
 
-0. Image content (`image_url` parts) + non-vision model → `vision` tier
+0. **Image content** (`image_url` parts) → `vision` tier — hard stop, no fallthrough (see below)
 1. `X-Tier` header / `?tier=` query param
 2. Per-user `allowed_tiers` whitelist
 3. Budget gate (downgrade or 402)
@@ -71,7 +71,15 @@ When using `llm-auto`, the router picks a tier based on (priority order):
 6. Complexity keywords
 7. Default: `simple`
 
-**Vision fallback** when no vision pod is available: controlled by `config/tiers.yaml` → `vision.fallback`. Default `strip_images` drops image parts and continues on the text tier. Set to `error` to return HTTP 400 instead.
+### Vision routing
+
+Any request containing `image_url` content parts routes exclusively to the `vision` tier. Steps 1–7 are skipped entirely for image requests.
+
+**If vision tier is unavailable** (not configured or user lacks access): HTTP 503 immediately — no fallthrough to a text tier.
+
+**If a vision pod fails to acquire**: HTTP 400 — images are never silently stripped and re-routed to a text model unless the request sets `downstream_model` (multi-model pipeline use case).
+
+**Pipeline exception**: Set `downstream_model` on the request to signal that vision output feeds into a second model. In that case, if the vision pod fails and `config/tiers.yaml → vision.fallback = strip_images`, images are stripped and the request is re-routed to the downstream text tier.
 
 ## Tier Locking
 
