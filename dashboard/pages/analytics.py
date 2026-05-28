@@ -89,14 +89,14 @@ def render() -> None:
                 grouped_daily = ddf.to_dict("records")
             else:
                 grouped_daily = []
-            st.plotly_chart(cost_trend_chart(grouped_daily), use_container_width=True)
+            st.plotly_chart(cost_trend_chart(grouped_daily), use_container_width=True, key="cost_trend_grouped")
         else:
-            st.plotly_chart(cost_trend_chart(daily), use_container_width=True)
+            st.plotly_chart(cost_trend_chart(daily), use_container_width=True, key="cost_trend_daily")
 
-        st.plotly_chart(avg_cost_per_request(daily), use_container_width=True)
+        st.plotly_chart(avg_cost_per_request(daily), use_container_width=True, key="avg_cost_per_request")
 
     with tab2:
-        st.plotly_chart(usage_hours_bar(daily), use_container_width=True)
+        st.plotly_chart(usage_hours_bar(daily), use_container_width=True, key="usage_hours_bar")
 
         # Request timeline with pandas resample
         tdf = df.copy()
@@ -111,14 +111,14 @@ def render() -> None:
                      color_discrete_sequence=["#60a5fa"])
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                           font=dict(color="#e5e7eb"), margin=dict(l=40, r=20, t=40, b=40))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="request_volume_timeline")
 
     with tab3:
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(tier_pie_chart(distribution, "requests"), use_container_width=True)
+            st.plotly_chart(tier_pie_chart(distribution, "requests"), use_container_width=True, key="tier_pie_requests")
         with right:
-            st.plotly_chart(tier_pie_chart(distribution, "cost_usd"), use_container_width=True)
+            st.plotly_chart(tier_pie_chart(distribution, "cost_usd"), use_container_width=True, key="tier_pie_cost")
 
         # Tier stats table
         if distribution:
@@ -129,7 +129,7 @@ def render() -> None:
             st.dataframe(dist_df, use_container_width=True, hide_index=True)
 
     with tab4:
-        st.plotly_chart(latency_histogram(requests), use_container_width=True)
+        st.plotly_chart(latency_histogram(requests), use_container_width=True, key="latency_histogram")
 
         # P50/P95/P99
         if not df.empty:
