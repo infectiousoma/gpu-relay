@@ -24,7 +24,7 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 - `providers/local.py` — routes to local Ollama, no pod lifecycle
 - `providers/api_compat.py` — OpenAI/Groq/Together/Mistral/DeepSeek pass-through
 - `providers/together_dedicated.py` — Together AI dedicated endpoint provider; spins up reserved GPU for vision models; `_TIER_CONFIG` maps tier → (hardware list, model)
-- `database/models.py` — User (preferred_tiers, disabled_providers, provider_order, allowed_tiers), Pod, Request, ApiKey, UserProviderKey (encrypted personal API keys), Invoice
+- `database/models.py` — User (preferred_tiers, disabled_providers, provider_order, allowed_tiers, allow_env_storage, no_volume_policy), Pod, Request, ApiKey, UserProviderKey (encrypted personal API keys), UserVolumeKey (per-provider persistent storage volume keys), Invoice
 - `cli/llm_ctl.py` — admin CLI; **must run from project dir**: `docker compose exec bridge python -m cli.llm_ctl`; see `docs/cli.md`
 
 ## Tiers
@@ -41,10 +41,34 @@ Pod provider prices synced from live RunPod GPU catalog at startup.
 
 **API provider costs** calculated per-token using rates in `config/tiers.yaml` → `api_token_costs` (USD per 1K tokens, separate input/output rates per model). Edit that block to update pricing — no code change needed. `Request.model` stores the actual model name (e.g. `gpt-4o-mini`) for API providers.
 
+## Volume Storage (per-user)
+
+Users can register their own persistent storage volume per provider instead of sharing the global `RUNPOD_NETWORK_VOLUME_ID`.
+
+**DB table:** `user_volume_keys` — `user_id`, `provider`, `volume_id`, `api_key_encrypted` (Fernet, same `PROVIDER_KEY_SECRET`), `datacenter`, `created_at`. One row per user per provider.
+
+**User fields:**
+- `allow_env_storage` (bool, default True) — admin toggle; if False, user cannot use the env-level volume even if no user key is set
+- `no_volume_policy` (enum, default `use_env`) — controls what happens when no user volume key is found for the provider being launched:
+  - `use_env` — fall back to `RUNPOD_NETWORK_VOLUME_ID` if `allow_env_storage` and var is set
+  - `stateless` — launch without any volume (models re-pulled on every cold start)
+  - `block` — reject the request with HTTP 400
+
+**Volume key API (authenticated user):**
+- `GET /v1/user/volume-keys` — list (no decrypted key in response)
+- `POST /v1/user/volume-keys` — upsert `{provider, volume_id, api_key, datacenter?}` (one per provider)
+- `DELETE /v1/user/volume-keys/{id}` — remove
+
+**DC validation:** Before launch, `_validate_network_volume()` in `providers/runpod.py` queries `{ myself { networkVolumes { id datacenterId } } }` using the user's key. If `datacenter` is set on the volume key and does not match the volume's actual `datacenterId`, the launch fails immediately with HTTP 400 (`VolumeValidationError`). This error is non-retryable — `InstanceManager` does not fall through to the next provider.
+
+**Admin CLI:** `llmctl users storage <email> [--allow-env/--no-allow-env] [--policy use_env|stateless|block]`
+
+**Known limitation:** Post-launch RunPod management (health, terminate) uses the system `RUNPOD_API_KEY`. If the user's key is for a different account, `terminate()` will silently fail. Ollama HTTP health checks are unaffected (no API key needed).
+
 ## Provider Types
 
 `provider_type` on BaseProvider controls lifecycle in InstanceManager:
-- `"pod"` — full lifecycle: launch → wait-for-ready → pull model → health check → terminate on idle
+- `"pod"` — full lifecycle: launch → wait-for-ready (volume resolved first) → pull model → health check → terminate on idle
 - `"local"` — wait-for-ready + pull model; terminate is no-op
 - `"api"` — skip all lifecycle; inject `extra_request_headers()` (Bearer token) per request
 
@@ -117,7 +141,7 @@ Preprocessing rewrites user prompt via local Ollama 7B → structured JSON befor
 ```
 PROVIDER_PRIORITY=runpod,vast,lambda    # or: local / openai,runpod / etc.
 RUNPOD_API_KEY=
-RUNPOD_NETWORK_VOLUME_ID=              # optional; if set, validated before launch
+RUNPOD_NETWORK_VOLUME_ID=              # optional global volume; superseded per-user if user volume key set
 OPENAI_API_KEY=                        # enables openai provider
 GROQ_API_KEY=                          # enables groq provider
 TOGETHER_API_KEY=
@@ -134,7 +158,7 @@ PROVIDER_KEY_SECRET=                   # required for personal API key encryptio
 
 ## DB Tables
 
-`users`, `api_keys`, `pods`, `requests`, `invoices`, `audit_log`
+`users`, `api_keys`, `pods`, `requests`, `invoices`, `audit_log`, `user_provider_keys`, `user_volume_keys`
 
 API keys: SHA-256 hashed, plaintext shown once. Passwords: bcrypt.
 
@@ -144,6 +168,7 @@ Users can configure per-request behavior without admin intervention:
 - **Tier preferences** — subset of allowed_tiers the router may use (e.g. skip `ultra` to save cost)
 - **Provider order + disable** — multiselect ordered list; selected = enabled in that priority order; unselected = disabled. Overrides tier `provider_overrides` for that user's requests.
 - **Personal API keys** — per-provider keys (groq, openai, together, mistral, deepseek) stored Fernet-encrypted in `user_provider_keys`. Bridge substitutes the user's key on outbound requests; requires `PROVIDER_KEY_SECRET` in `.env`.
+- **Volume keys** — per-provider persistent storage volume registrations in `user_volume_keys`. See Volume Storage section above.
 
 Admin ceiling (`allowed_tiers` via `llmctl users tiers`) always trumps user preferences.
 

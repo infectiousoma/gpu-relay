@@ -63,6 +63,7 @@ from bridge.schemas import PodHandle
 from bridge.settings import settings
 from database.models import Pod, PodStatus, TierName
 from database.session import SessionLocal
+from providers.base import VolumeValidationError
 
 if TYPE_CHECKING:
     from providers.base import BaseProvider
@@ -152,6 +153,7 @@ class InstanceManager:
         disabled_providers: list[str] | None = None,
         provider_order: list[str] | None = None,
         user_label: str | None = None,
+        user_id: str | None = None,
     ) -> PodHandle:
         """Return a ready PodHandle; spins a new pod if none available.
 
@@ -224,9 +226,14 @@ class InstanceManager:
                 if provider is None:
                     continue
                 try:
-                    pod_handle = await self._spin_pod(tier, provider_name, provider, user_label=user_label)
+                    pod_handle = await self._spin_pod(
+                        tier, provider_name, provider,
+                        user_label=user_label, user_id=user_id,
+                    )
                     self._pods[tier] = pod_handle.pod_id
                     return pod_handle
+                except VolumeValidationError:
+                    raise  # user config error — don't try other providers
                 except Exception as exc:
                     log.warning("provider_failed", provider=provider_name, tier=tier, error=str(exc))
                     last_error = exc
@@ -271,7 +278,14 @@ class InstanceManager:
         result = await session.execute(q.limit(1))
         return result.scalar_one_or_none()
 
-    async def _spin_pod(self, tier: str, provider_name: str, provider: "BaseProvider", user_label: str | None = None) -> PodHandle:
+    async def _spin_pod(
+        self,
+        tier: str,
+        provider_name: str,
+        provider: "BaseProvider",
+        user_label: str | None = None,
+        user_id: str | None = None,
+    ) -> PodHandle:
         # API providers are stateless — upsert the single canonical row per (provider, tier).
         if getattr(provider, "provider_type", "") == "api":
             return await self._spin_api_pod(tier, provider_name, provider)
@@ -293,8 +307,15 @@ class InstanceManager:
             session.add(pod)
             await session.commit()
 
+        vol_id, vol_key, vol_dc = await self._resolve_user_volume(user_id, provider_name)
         try:
-            info = await provider.launch(tier, user_label=user_label)
+            info = await provider.launch(
+                tier,
+                user_label=user_label,
+                volume_id=vol_id,
+                volume_api_key=vol_key,
+                volume_datacenter=vol_dc,
+            )
         except Exception:
             async with SessionLocal() as session:
                 pod = await session.get(Pod, pod_id)
@@ -374,6 +395,58 @@ class InstanceManager:
                 cold_start=False,
                 extra_headers=provider.extra_request_headers(),
             )
+
+    async def _resolve_user_volume(
+        self,
+        user_id: str | None,
+        provider_name: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return (volume_id, api_key_plaintext, datacenter) for pod launch.
+
+        Applies the user's no_volume_policy when no user-supplied volume key exists.
+        Raises VolumeValidationError if policy == block and no volume is configured.
+        """
+        from database.models import NoVolumePolicy, User, UserVolumeKey
+        from bridge.crypto import decrypt_provider_key
+        from sqlalchemy import select as _select
+
+        if not user_id:
+            if provider_name == "runpod" and settings.runpod_network_volume_id:
+                return settings.runpod_network_volume_id, None, None
+            return None, None, None
+
+        async with SessionLocal() as session:
+            user = await session.get(User, user_id)
+            uvk_row = await session.execute(
+                _select(UserVolumeKey).where(
+                    UserVolumeKey.user_id == user_id,
+                    UserVolumeKey.provider == provider_name,
+                )
+            )
+            uvk = uvk_row.scalar_one_or_none()
+
+        if uvk:
+            api_key = decrypt_provider_key(uvk.api_key_encrypted) if uvk.api_key_encrypted else None
+            return uvk.volume_id, api_key, uvk.datacenter
+
+        if user is None:
+            return None, None, None
+
+        policy = user.no_volume_policy or NoVolumePolicy.use_env
+        allow_env = user.allow_env_storage
+
+        if policy == NoVolumePolicy.block:
+            raise VolumeValidationError(
+                f"No volume key configured for provider '{provider_name}'. "
+                "Your storage policy requires one. "
+                "Add a volume key at POST /v1/user/volume-keys."
+            )
+        if policy == NoVolumePolicy.stateless:
+            return None, None, None
+        # use_env
+        if provider_name == "runpod" and allow_env and settings.runpod_network_volume_id:
+            return settings.runpod_network_volume_id, None, None
+        return None, None, None
 
     async def _wait_for_ready(self, endpoint_url: str, pod_id: str) -> str:
         deadline = asyncio.get_event_loop().time() + settings.cold_start_timeout_sec

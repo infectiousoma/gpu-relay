@@ -32,6 +32,7 @@ from providers.base import (
     PodInfo,
     ProviderError,
     TIER_MODEL,
+    VolumeValidationError,
 )
 
 log = structlog.get_logger(__name__)
@@ -71,12 +72,13 @@ class RunPodProvider(BaseProvider):
     def _url(self) -> str:
         return f"{_GQL_URL}?api_key={self._api_key}"
 
-    async def _gql(self, query: str, variables: dict | None = None) -> dict:
+    async def _gql(self, query: str, variables: dict | None = None, api_key: str | None = None) -> dict:
         payload: dict = {"query": query}
         if variables:
             payload["variables"] = variables
+        url = f"{_GQL_URL}?api_key={api_key if api_key is not None else self._api_key}"
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(self._url(), json=payload, headers=self._headers())
+            r = await client.post(url, json=payload, headers=self._headers())
             r.raise_for_status()
             data = r.json()
         if "errors" in data:
@@ -95,8 +97,15 @@ class RunPodProvider(BaseProvider):
     # Public API
     # ------------------------------------------------------------------
 
-    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
-        if not self._api_key:
+    async def launch(
+        self,
+        tier: str,
+        user_label: str | None = None,
+        volume_id: str | None = None,
+        volume_api_key: str | None = None,
+        volume_datacenter: str | None = None,
+    ) -> PodInfo:
+        if not (volume_api_key or self._api_key):
             raise ProviderError("RUNPOD_API_KEY not set", retryable=False)
 
         offers = await self.list_gpus()
@@ -115,11 +124,16 @@ class RunPodProvider(BaseProvider):
             }
         }
         """
-        volume_id = settings.runpod_network_volume_id
-        if volume_id:
-            await self._validate_network_volume(volume_id)
+        # User-supplied volume takes precedence over global env volume.
+        effective_volume_id = volume_id or settings.runpod_network_volume_id
+        if effective_volume_id:
+            await self._validate_network_volume(
+                effective_volume_id,
+                api_key=volume_api_key,
+                expected_datacenter=volume_datacenter,
+            )
         env = [{"key": "OLLAMA_MODEL", "value": model}]
-        if volume_id:
+        if effective_volume_id:
             env.append({"key": "OLLAMA_MODELS", "value": "/runpod-volume/ollama"})
 
         last_error: Exception | None = None
@@ -129,7 +143,7 @@ class RunPodProvider(BaseProvider):
                 "gpuCount": 1,
                 "gpuTypeId": offer.gpu_type_id,
                 "containerDiskInGb": 20,
-                "volumeInGb": 50 if volume_id else 0,
+                "volumeInGb": 50 if effective_volume_id else 0,
                 "minVcpuCount": 2,
                 "minMemoryInGb": 16,
                 "imageName": "ollama/ollama:latest",
@@ -138,12 +152,14 @@ class RunPodProvider(BaseProvider):
                 "name": f"llm-{tier}-{user_label}" if user_label else f"llm-{tier}",
                 "supportPublicIp": True,
             }
-            if volume_id:
-                inp["networkVolumeId"] = volume_id
+            if effective_volume_id:
+                inp["networkVolumeId"] = effective_volume_id
                 inp["volumeMountPath"] = "/runpod-volume"
+            if volume_datacenter:
+                inp["dataCenterId"] = volume_datacenter
 
             try:
-                data = await self._gql(mutation, {"input": inp})
+                data = await self._gql(mutation, {"input": inp}, api_key=volume_api_key)
                 pod_data = data.get("podFindAndDeployOnDemand")
                 if not pod_data:
                     raise ProviderError("RunPod returned empty pod response", retryable=True)
@@ -283,17 +299,33 @@ class RunPodProvider(BaseProvider):
         # will do the Ollama readiness probe.
         return f"https://{external_id}-{OLLAMA_PORT}.proxy.runpod.net"
 
-    async def _validate_network_volume(self, volume_id: str) -> None:
-        data = await self._gql("{ myself { networkVolumes { id } } }")
+    async def _validate_network_volume(
+        self,
+        volume_id: str,
+        api_key: str | None = None,
+        expected_datacenter: str | None = None,
+    ) -> None:
+        data = await self._gql(
+            "{ myself { networkVolumes { id datacenterId } } }",
+            api_key=api_key,
+        )
         volumes = data.get("myself", {}).get("networkVolumes", [])
-        ids = [v["id"] for v in volumes]
-        if volume_id not in ids:
-            raise ProviderError(
+        vol = next((v for v in volumes if v["id"] == volume_id), None)
+        if vol is None:
+            ids = [v["id"] for v in volumes]
+            raise VolumeValidationError(
                 f"RunPod network volume '{volume_id}' not found on account "
                 f"(found: {ids or 'none'}). "
-                "Create one at runpod.io/console/user/storage or clear RUNPOD_NETWORK_VOLUME_ID.",
-                retryable=False,
+                "Create one at runpod.io/console/user/storage or update your volume key."
             )
+        if expected_datacenter:
+            actual_dc = vol.get("datacenterId", "")
+            if actual_dc != expected_datacenter:
+                raise VolumeValidationError(
+                    f"RunPod volume '{volume_id}' is in datacenter '{actual_dc}', "
+                    f"but volume key specifies '{expected_datacenter}'. "
+                    "Update your volume key's datacenter field to match."
+                )
 
     @staticmethod
     def _extract_endpoint(pod: dict) -> str:

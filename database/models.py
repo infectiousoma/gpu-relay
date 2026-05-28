@@ -97,6 +97,12 @@ class RequestStatus(str, enum.Enum):
     rejected_budget = "rejected_budget"
 
 
+class NoVolumePolicy(str, enum.Enum):
+    use_env = "use_env"      # no user volume → use RUNPOD_NETWORK_VOLUME_ID env
+    stateless = "stateless"  # no user volume → launch without any volume
+    block = "block"          # no user volume → reject the request
+
+
 # ---------------------------------------------------------------------------
 # Users / auth
 # ---------------------------------------------------------------------------
@@ -125,6 +131,14 @@ class User(Base):
     provider_order: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
     # admin-controlled: whether this user may use the local provider
     allow_local: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # admin-controlled: whether this user may use the env-level RUNPOD_NETWORK_VOLUME_ID
+    allow_env_storage: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # what to do when no user-supplied volume key is found for the provider
+    no_volume_policy: Mapped[NoVolumePolicy] = mapped_column(
+        Enum(NoVolumePolicy, name="no_volume_policy"),
+        default=NoVolumePolicy.use_env,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -132,6 +146,7 @@ class User(Base):
     requests: Mapped[list["Request"]] = relationship(back_populates="user")
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="user")
     provider_keys: Mapped[list["UserProviderKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    volume_keys: Mapped[list["UserVolumeKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("monthly_budget_usd >= 0", name="ck_users_budget_nonneg"),
@@ -169,6 +184,26 @@ class UserProviderKey(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uq_user_provider_key"),
+    )
+
+
+class UserVolumeKey(Base):
+    """User-supplied persistent-storage volume key per provider (encrypted at rest)."""
+
+    __tablename__ = "user_volume_keys"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    volume_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    api_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    datacenter: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="volume_keys")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_volume_provider"),
     )
 
 

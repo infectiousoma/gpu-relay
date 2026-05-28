@@ -12,6 +12,9 @@ DELETE /auth/keys/{key_id}         — revoke API key
 GET  /admin/pods                   — list pods (admin)
 DELETE /admin/pods/{pod_id}        — force terminate pod (admin)
 GET  /admin/users                  — list users (admin)
+GET  /v1/user/volume-keys          — list user's volume keys
+POST /v1/user/volume-keys          — add/update a volume key
+DELETE /v1/user/volume-keys/{id}   — delete a volume key
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from typing import Annotated
 import httpx
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from pydantic import BaseModel
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -66,9 +70,10 @@ from bridge.schemas import (
     TokenResponse,
     Usage,
 )
-from bridge.crypto import decrypt_provider_key
+from bridge.crypto import decrypt_provider_key, encrypt_provider_key
 from bridge.settings import settings
-from database.models import ApiKey, Pod, PodStatus, Request as DBRequest, RequestStatus, User, UserProviderKey
+from database.models import ApiKey, Pod, PodStatus, Request as DBRequest, RequestStatus, User, UserProviderKey, UserVolumeKey
+from providers.base import VolumeValidationError
 from database.session import SessionLocal, get_session
 
 log = structlog.get_logger(__name__)
@@ -254,8 +259,17 @@ async def chat_completions(
     _provider_order = list(user.provider_order or [])
     try:
         _user_label = user.email.split("@")[0][:20] if user.email else None
-        pod = await manager.acquire(decision.tier, provider_override=provider_override, disabled_providers=_disabled, provider_order=_provider_order or None, user_label=_user_label)
+        pod = await manager.acquire(
+            decision.tier,
+            provider_override=provider_override,
+            disabled_providers=_disabled,
+            provider_order=_provider_order or None,
+            user_label=_user_label,
+            user_id=user.id,
+        )
         await _apply_user_provider_key(pod, user.id, session)
+    except VolumeValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.error("acquire_failed", tier=decision.tier, error=str(exc))
         if decision.tier == "vision":
@@ -265,7 +279,7 @@ async def chat_completions(
                 body.messages = strip_images_from_messages(body.messages)
                 decision = await select_tier(body, user, request, monthly_spent)
                 try:
-                    pod = await manager.acquire(decision.tier, user_label=_user_label)
+                    pod = await manager.acquire(decision.tier, user_label=_user_label, user_id=user.id)
                 except Exception as exc2:
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -696,6 +710,107 @@ async def revoke_api_key(
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Key not found")
     row.revoked_at = datetime.now(timezone.utc)
+    await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# User Volume Key routes
+# ---------------------------------------------------------------------------
+
+_VALID_VOLUME_PROVIDERS = {"runpod", "vast", "lambda"}
+
+
+class VolumeKeyCreate(BaseModel):
+    provider: str
+    volume_id: str
+    api_key: str
+    datacenter: str | None = None
+
+
+class VolumeKeyOut(BaseModel):
+    id: str
+    provider: str
+    volume_id: str
+    datacenter: str | None
+    created_at: str
+
+
+@app.get("/v1/user/volume-keys", response_model=list[VolumeKeyOut])
+async def list_volume_keys(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    result = await session.execute(
+        select(UserVolumeKey).where(UserVolumeKey.user_id == user.id)
+    )
+    return [
+        VolumeKeyOut(
+            id=r.id,
+            provider=r.provider,
+            volume_id=r.volume_id,
+            datacenter=r.datacenter,
+            created_at=r.created_at.isoformat(),
+        )
+        for r in result.scalars().all()
+    ]
+
+
+@app.post("/v1/user/volume-keys", response_model=VolumeKeyOut, status_code=201)
+async def add_volume_key(
+    body: VolumeKeyCreate,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    if body.provider not in _VALID_VOLUME_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown provider '{body.provider}'. Must be one of {sorted(_VALID_VOLUME_PROVIDERS)}",
+        )
+
+    existing = (await session.execute(
+        select(UserVolumeKey).where(
+            UserVolumeKey.user_id == user.id,
+            UserVolumeKey.provider == body.provider,
+        )
+    )).scalar_one_or_none()
+
+    encrypted = encrypt_provider_key(body.api_key)
+    if existing:
+        existing.volume_id = body.volume_id
+        existing.api_key_encrypted = encrypted
+        existing.datacenter = body.datacenter
+        row = existing
+    else:
+        row = UserVolumeKey(
+            user_id=user.id,
+            provider=body.provider,
+            volume_id=body.volume_id,
+            api_key_encrypted=encrypted,
+            datacenter=body.datacenter,
+        )
+        session.add(row)
+
+    await session.commit()
+    await session.refresh(row)
+    return VolumeKeyOut(
+        id=row.id,
+        provider=row.provider,
+        volume_id=row.volume_id,
+        datacenter=row.datacenter,
+        created_at=row.created_at.isoformat(),
+    )
+
+
+@app.delete("/v1/user/volume-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_volume_key(
+    key_id: str,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    row = await session.get(UserVolumeKey, key_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Volume key not found")
+    await session.delete(row)
     await session.commit()
 
 

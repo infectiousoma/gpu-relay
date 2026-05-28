@@ -43,6 +43,19 @@ llmctl users list                                     # list all users
 
 > **Tier restriction vs user preference:** `users tiers` sets the **admin ceiling** — the maximum tiers a user may access. Users can further restrict their own routing via Settings → Tier Preferences in the dashboard. The admin ceiling always wins.
 
+## Volume Storage Policy
+
+```bash
+llmctl users storage <email>                             # show policy + registered volume keys
+llmctl users storage <email> --policy use_env            # use env volume if no user key (default)
+llmctl users storage <email> --policy stateless          # always launch without a volume
+llmctl users storage <email> --policy block              # require user volume key; reject otherwise
+llmctl users storage <email> --allow-env                 # allow use of RUNPOD_NETWORK_VOLUME_ID
+llmctl users storage <email> --no-allow-env              # prevent use of shared env volume
+```
+
+`no_volume_policy` controls the fallback when no user-supplied volume key exists for the active provider. `allow_env_storage` is an admin override: even if policy is `use_env`, setting `--no-allow-env` prevents the shared env volume from being used for that user.
+
 ## API Keys
 
 ```bash

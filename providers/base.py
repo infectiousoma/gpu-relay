@@ -40,6 +40,13 @@ class ProviderError(Exception):
         self.retryable = retryable
 
 
+class VolumeValidationError(ProviderError):
+    """Volume not found on account or datacenter mismatch — non-retryable, surfaces as HTTP 400."""
+
+    def __init__(self, message: str):
+        super().__init__(message, retryable=False)
+
+
 @dataclass
 class PodInfo:
     """Canonical pod descriptor returned by all provider methods."""
@@ -128,8 +135,20 @@ class BaseProvider(ABC):
         return {}
 
     @abstractmethod
-    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
-        """Provision a new pod for *tier*.  Block until endpoint_url is assigned."""
+    async def launch(
+        self,
+        tier: str,
+        user_label: str | None = None,
+        volume_id: str | None = None,
+        volume_api_key: str | None = None,
+        volume_datacenter: str | None = None,
+    ) -> PodInfo:
+        """Provision a new pod for *tier*.  Block until endpoint_url is assigned.
+
+        volume_id: user-supplied persistent storage volume ID for this provider.
+        volume_api_key: plaintext API key that owns the volume (overrides system key).
+        volume_datacenter: expected datacenter for the volume; pod is constrained to it.
+        """
         ...
 
     @abstractmethod

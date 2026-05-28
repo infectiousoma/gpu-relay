@@ -49,6 +49,7 @@ from database.models import (
     BillingMode,
     Invoice,
     InvoiceStatus,
+    NoVolumePolicy,
     Pod,
     PodStatus,
     Quota,
@@ -57,6 +58,7 @@ from database.models import (
     TierName,
     User,
     UserRole,
+    UserVolumeKey,
 )
 from database.session import SessionLocal
 
@@ -269,6 +271,68 @@ async def users_deactivate(email: str):
         user.is_active = False
         await session.commit()
     console.print(f"[yellow]Deactivated[/yellow] {email}")
+
+
+@users_app.command("storage")
+@async_cmd
+async def users_storage(
+    email: str,
+    allow_env: Optional[bool] = typer.Option(
+        None, "--allow-env/--no-allow-env",
+        help="Grant or revoke use of RUNPOD_NETWORK_VOLUME_ID env volume",
+    ),
+    policy: Optional[str] = typer.Option(
+        None, "--policy",
+        help="no_volume_policy: use_env | stateless | block",
+    ),
+):
+    """Show or set volume storage policy for a user.
+
+    Examples:
+      llmctl users storage user@example.com                       # show
+      llmctl users storage user@example.com --policy stateless    # no volume fallback
+      llmctl users storage user@example.com --policy block        # require user volume
+      llmctl users storage user@example.com --no-allow-env        # disallow env volume
+    """
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if not user:
+            err_console.print(f"User not found: {email}")
+            raise typer.Exit(1)
+
+        if allow_env is None and policy is None:
+            vks = (await session.execute(
+                select(UserVolumeKey).where(UserVolumeKey.user_id == user.id)
+            )).scalars().all()
+
+            console.print(f"\n[bold]Storage policy — {email}[/bold]")
+            env_flag = "[green]yes[/green]" if user.allow_env_storage else "[red]no[/red]"
+            console.print(f"  allow_env_storage: {env_flag}")
+            console.print(f"  no_volume_policy:  [bold]{user.no_volume_policy.value}[/bold]")
+            if vks:
+                t = Table(title="User Volume Keys")
+                for col in ("Provider", "Volume ID", "Datacenter", "Created"):
+                    t.add_column(col)
+                for k in vks:
+                    t.add_row(k.provider, k.volume_id, k.datacenter or "—", k.created_at.strftime("%Y-%m-%d"))
+                console.print(t)
+            else:
+                console.print("  [dim]No user volume keys configured.[/dim]")
+            return
+
+        if allow_env is not None:
+            user.allow_env_storage = allow_env
+        if policy is not None:
+            try:
+                user.no_volume_policy = NoVolumePolicy(policy)
+            except ValueError:
+                err_console.print(f"Invalid policy '{policy}'. Must be: use_env | stateless | block")
+                raise typer.Exit(1)
+        await session.commit()
+
+    console.print(f"[green]Storage policy updated[/green] for {email}")
+    console.print(f"  allow_env_storage: {user.allow_env_storage}")
+    console.print(f"  no_volume_policy:  {user.no_volume_policy.value}")
 
 
 @users_app.command("local-access")
