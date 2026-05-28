@@ -415,6 +415,7 @@ class InstanceManager:
                 return settings.runpod_network_volume_id, None, None
             return None, None, None
 
+        from database.models import UserProviderKey as _UPK
         async with SessionLocal() as session:
             user = await session.get(User, user_id)
             uvk_row = await session.execute(
@@ -424,9 +425,27 @@ class InstanceManager:
                 )
             )
             uvk = uvk_row.scalar_one_or_none()
+            upk_row = await session.execute(
+                _select(_UPK).where(
+                    _UPK.user_id == user_id,
+                    _UPK.provider == provider_name,
+                )
+            )
+            upk = upk_row.scalar_one_or_none()
+
+        # Decrypt GPU provider key if set (used for pod launch billing to user's account).
+        provider_api_key: str | None = None
+        if upk and upk.encrypted_key:
+            try:
+                provider_api_key = decrypt_provider_key(upk.encrypted_key)
+            except Exception:
+                pass
 
         if uvk:
             api_key = decrypt_provider_key(uvk.api_key_encrypted) if uvk.api_key_encrypted else None
+            # Fall back to UserProviderKey if volume key has no api_key stored.
+            if not api_key:
+                api_key = provider_api_key
             return uvk.volume_id, api_key, uvk.datacenter
 
         if user is None:
@@ -442,11 +461,11 @@ class InstanceManager:
                 "Add a volume key at POST /v1/user/volume-keys."
             )
         if policy == NoVolumePolicy.stateless:
-            return None, None, None
+            return None, provider_api_key, None
         # use_env
         if provider_name == "runpod" and allow_env and settings.runpod_network_volume_id:
-            return settings.runpod_network_volume_id, None, None
-        return None, None, None
+            return settings.runpod_network_volume_id, provider_api_key, None
+        return None, provider_api_key, None
 
     async def _wait_for_ready(self, endpoint_url: str, pod_id: str) -> str:
         deadline = asyncio.get_event_loop().time() + settings.cold_start_timeout_sec

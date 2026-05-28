@@ -35,6 +35,7 @@ from database.models import (
     User,
     UserProviderKey,
     UserRole,
+    UserVolumeKey,
 )
 
 
@@ -368,6 +369,65 @@ def delete_user_provider_key(session: Session, user_id: str, provider: str) -> N
     ).scalar_one_or_none()
     if existing:
         session.delete(existing)
+        session.commit()
+
+
+def get_user_volume_keys(session: Session, user_id: str) -> list[dict]:
+    """Return stored volume keys for a user (no decrypted api_key)."""
+    rows = session.execute(
+        select(UserVolumeKey).where(UserVolumeKey.user_id == user_id)
+    ).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "provider": r.provider,
+            "volume_id": r.volume_id,
+            "datacenter": r.datacenter,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
+def upsert_user_volume_key(
+    session: Session,
+    user_id: str,
+    provider: str,
+    volume_id: str,
+    api_key_encrypted: str | None,
+    datacenter: str | None,
+) -> None:
+    existing = session.execute(
+        select(UserVolumeKey).where(
+            UserVolumeKey.user_id == user_id,
+            UserVolumeKey.provider == provider,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        existing.volume_id = volume_id
+        if api_key_encrypted:
+            existing.api_key_encrypted = api_key_encrypted
+        existing.datacenter = datacenter
+    else:
+        session.add(UserVolumeKey(
+            user_id=user_id,
+            provider=provider,
+            volume_id=volume_id,
+            api_key_encrypted=api_key_encrypted or "",
+            datacenter=datacenter,
+        ))
+    session.commit()
+
+
+def delete_user_volume_key(session: Session, key_id: str, user_id: str) -> None:
+    row = session.execute(
+        select(UserVolumeKey).where(
+            UserVolumeKey.id == key_id,
+            UserVolumeKey.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if row:
+        session.delete(row)
         session.commit()
 
 
