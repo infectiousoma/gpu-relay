@@ -26,13 +26,19 @@ PROVIDER_PRIORITY=runpod
 
 Pods launch on demand and terminate after `idle_timeout_sec` of inactivity. No cost while idle.
 
-**GPU fallback**: if the preferred GPU (e.g. RTX 4090) has no capacity at deploy time, the bridge automatically tries the next viable GPU type in preference order (`TIER_GPU_PREFERENCE` in `providers/base.py`) before failing. Returns 503 to the client only when all candidates are exhausted. Preference order for each tier:
+**GPU fallback**: if the preferred GPU has no secure-cloud capacity, the bridge tries every viable GPU type in preference order, then retries all candidates on community cloud before failing. Returns 503 only when all candidates are exhausted on both cloud types.
 
-| Tier | GPU preference order |
-|------|----------------------|
-| `simple` / `architecture` / `vision` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest ≥8 GB |
-| `maximum` | L40S → L40 → A40 → A100 40GB → cheapest ≥38 GB |
-| `ultra` | A100 80GB → H100 → cheapest ≥50 GB |
+| Tier | GPU preference order | VRAM range |
+|------|----------------------|------------|
+| `simple` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest in range | 8–24 GB |
+| `vision` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest in range | 10–24 GB |
+| `architecture` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest ≥20 GB | ≥20 GB |
+| `maximum` | L40S → L40 → A40 → A100 40GB → cheapest ≥38 GB | ≥38 GB |
+| `ultra` | A100 80GB → H100 → cheapest ≥50 GB | ≥50 GB |
+
+The VRAM cap on `simple` and `vision` prevents those tiers from landing on datacenter-class GPUs (A100, H100, H200) when preferred types are sold out — which would be 5–10× the cost with no benefit for a 7B/13B model.
+
+**Community cloud fallback**: after all SECURE candidates are exhausted, the bridge retries with `cloudType: COMMUNITY` (same GPU types, shared/interruptible nodes). Community pods are lower cost but can be preempted. A `runpod_community_fallback` log event is emitted when this path is taken.
 
 Cold starts pull the Docker image + model on first use:
 - 7B model: ~3–5 min first run, ~30 s with network volume
@@ -83,7 +89,9 @@ Content-Type: application/json
 
 The `api_key` is encrypted at rest using the same Fernet key as provider keys (`PROVIDER_KEY_SECRET`).
 
-**DC validation:** If `datacenter` is set, the bridge calls `{ myself { networkVolumes { id datacenterId } } }` using the user's key before every launch. If the volume's actual `datacenterId` doesn't match, the launch returns HTTP 400 immediately — no fallback to other providers.
+**Key validation:** When saving a volume key in the dashboard Settings page, the API key and volume ID are validated against RunPod's API before storing. Invalid keys or volume IDs are rejected immediately — nothing is saved until the validation passes.
+
+**DC validation:** If `datacenter` is set, the bridge calls `{ myself { networkVolumes { id dataCenterId } } }` using the user's key before every launch. If the volume's actual `dataCenterId` doesn't match, the launch returns HTTP 400 immediately — no fallback to other providers.
 
 Other endpoints:
 ```http

@@ -84,6 +84,13 @@ TIER_VRAM_REQUIRED: dict[str, int] = {
     "vision": 10,         # minicpm-v q4 ≈ 5 GB; 10 GB floor for vision encoder headroom
 }
 
+# Tier → maximum VRAM cap (GB).  Prevents cheap tiers from landing on
+# datacenter-class GPUs when preferred ones have no capacity.
+TIER_VRAM_MAX: dict[str, int] = {
+    "simple": 24,         # 7B needs ≤16 GB; 24 GB cap prevents A100/H100 waste
+    "vision": 24,         # llava:13b needs ≤16 GB; same reasoning
+}
+
 # Tier → preferred GPU type names (matched against provider GPU names,
 # case-insensitive substring).  First match wins.
 TIER_GPU_PREFERENCE: dict[str, list[str]] = {
@@ -178,12 +185,13 @@ class BaseProvider(ABC):
     def _rank_gpu_offers(self, tier: str, offers: list[GpuOffer]) -> list[GpuOffer]:
         """Return all viable offers in preference order (preferred GPUs first, then by price)."""
         min_vram = TIER_VRAM_REQUIRED.get(tier, 8)
+        max_vram = TIER_VRAM_MAX.get(tier, 10_000)
         prefs = TIER_GPU_PREFERENCE.get(tier, [])
 
-        candidates = [o for o in offers if o.available and o.vram_gb >= min_vram]
+        candidates = [o for o in offers if o.available and min_vram <= o.vram_gb <= max_vram]
         if not candidates:
             raise ProviderError(
-                f"{self.name}: no available GPU with ≥{min_vram} GB VRAM for tier '{tier}'",
+                f"{self.name}: no available GPU with {min_vram}–{max_vram} GB VRAM for tier '{tier}'",
                 retryable=True,
             )
 

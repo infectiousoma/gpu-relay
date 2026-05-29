@@ -10,7 +10,7 @@
 | `architecture` | Qwen2.5-Coder 32B | RTX 4090 | ~$0.69 |
 | `maximum` | DeepSeek V3 | L40S 48GB | ~$1.14 |
 | `ultra` | Qwen2.5 72B | A100 80GB | ~$1.89 |
-| `vision` | Llama-3.2-11B-Vision (Together dedicated) / LLaVA 34B (RunPod) | L40 / A100 | ~$1.49–2.40 |
+| `vision` | Llama-3.2-11B-Vision (Together dedicated) / LLaVA 13B (RunPod) | L40 / RTX 4090 | ~$0.69–1.49 |
 
 **Vision quality tiers** (Together dedicated endpoints — `providers/together_dedicated.py`):
 
@@ -48,7 +48,7 @@ Same Ollama models as pod providers. Zero cost — budget gate skipped.
 - `llm-architecture`
 - `llm-maximum`
 - `llm-ultra`
-- `llm-vision` — vision model (Together: Llama-3.2-11B / RunPod: LLaVA 34B); selected automatically for image requests
+- `llm-vision` — vision model (Together: Llama-3.2-11B / RunPod: LLaVA 13B); selected automatically for image requests
 - `llm-auto` — router picks based on request complexity
 
 **Workflow models** (multi-step orchestration):

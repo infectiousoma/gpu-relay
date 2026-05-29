@@ -247,16 +247,46 @@ def _render_volume_key_form(provider: str, user_id: str, stored_vol_by_provider:
                 elif not api_key_input.strip() and not has_vol:
                     st.warning("API key is required for a new volume key.")
                 else:
-                    from bridge.crypto import encrypt_provider_key
-                    encrypted = encrypt_provider_key(api_key_input.strip()) if api_key_input.strip() else None
-                    with db_session() as session:
-                        upsert_user_volume_key(
-                            session, user_id, provider,
-                            vol_id.strip(), encrypted,
-                            datacenter.strip() or None,
-                        )
-                    st.session_state["settings_flash"] = f"{provider.title()} volume key saved."
-                    st.rerun()
+                    from bridge.crypto import decrypt_provider_key, encrypt_provider_key
+
+                    validation_err = None
+                    if provider == "runpod":
+                        plaintext_key = api_key_input.strip()
+                        if not plaintext_key and has_vol:
+                            with db_session() as _s:
+                                from database.models import UserVolumeKey as _UVK
+                                _row = _s.execute(
+                                    select(_UVK).where(
+                                        _UVK.user_id == user_id,
+                                        _UVK.provider == provider,
+                                    )
+                                ).scalar_one_or_none()
+                                if _row:
+                                    plaintext_key = decrypt_provider_key(_row.api_key_encrypted)
+
+                        if plaintext_key:
+                            from bridge.runpod_validate import validate_runpod_volume
+                            try:
+                                validation_err = validate_runpod_volume(
+                                    vol_id.strip(),
+                                    plaintext_key,
+                                    datacenter.strip() or None,
+                                )
+                            except Exception as e:
+                                validation_err = f"Validation error: {e}"
+
+                    if validation_err:
+                        st.error(validation_err)
+                    else:
+                        encrypted = encrypt_provider_key(api_key_input.strip()) if api_key_input.strip() else None
+                        with db_session() as session:
+                            upsert_user_volume_key(
+                                session, user_id, provider,
+                                vol_id.strip(), encrypted,
+                                datacenter.strip() or None,
+                            )
+                        st.session_state["settings_flash"] = f"{provider.title()} volume key saved."
+                        st.rerun()
 
             if remove:
                 with db_session() as session:

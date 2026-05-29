@@ -79,7 +79,16 @@ class RunPodProvider(BaseProvider):
         url = f"{_GQL_URL}?api_key={api_key if api_key is not None else self._api_key}"
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, json=payload, headers=self._headers())
-            r.raise_for_status()
+            if r.is_error:
+                try:
+                    body = r.json()
+                    detail = "; ".join(e.get("message", str(e)) for e in body.get("errors", [])) or r.text[:200]
+                except Exception:
+                    detail = r.text[:200]
+                raise ProviderError(
+                    f"RunPod API HTTP {r.status_code}: {detail}",
+                    retryable=r.status_code >= 500,
+                )
             data = r.json()
         if "errors" in data:
             msgs = [e.get("message", str(e)) for e in data["errors"]]
@@ -137,57 +146,67 @@ class RunPodProvider(BaseProvider):
             env.append({"key": "OLLAMA_MODELS", "value": "/runpod-volume/ollama"})
 
         last_error: Exception | None = None
-        for offer in candidates:
-            inp: dict = {
-                "cloudType": "SECURE",
-                "gpuCount": 1,
-                "gpuTypeId": offer.gpu_type_id,
-                "containerDiskInGb": 20,
-                "volumeInGb": 50 if effective_volume_id else 0,
-                "minVcpuCount": 2,
-                "minMemoryInGb": 16,
-                "imageName": "ollama/ollama:latest",
-                "env": env,
-                "ports": "11434/http",
-                "name": f"llm-{tier}-{user_label}" if user_label else f"llm-{tier}",
-                "supportPublicIp": True,
-            }
-            if effective_volume_id:
-                inp["networkVolumeId"] = effective_volume_id
-                inp["volumeMountPath"] = "/runpod-volume"
-            if volume_datacenter:
-                inp["dataCenterId"] = volume_datacenter
+        base_inp: dict = {
+            "gpuCount": 1,
+            "containerDiskInGb": 20,
+            "volumeInGb": 50 if effective_volume_id else 0,
+            "minVcpuCount": 2,
+            "minMemoryInGb": 16,
+            "imageName": "ollama/ollama:latest",
+            "env": env,
+            "ports": "11434/http",
+            "name": f"llm-{tier}-{user_label}" if user_label else f"llm-{tier}",
+            "supportPublicIp": True,
+        }
+        if effective_volume_id:
+            base_inp["networkVolumeId"] = effective_volume_id
+            base_inp["volumeMountPath"] = "/runpod-volume"
+        if volume_datacenter:
+            base_inp["dataCenterId"] = volume_datacenter
 
-            try:
-                data = await self._gql(mutation, {"input": inp}, api_key=volume_api_key)
-                pod_data = data.get("podFindAndDeployOnDemand")
-                if not pod_data:
-                    raise ProviderError("RunPod returned empty pod response", retryable=True)
-            except ProviderError as exc:
-                if "no longer any instances available" in str(exc).lower() or "no instances available" in str(exc).lower():
-                    log.warning("runpod_gpu_no_capacity", gpu=offer.gpu, tier=tier)
-                    last_error = exc
-                    continue
-                raise
+        # Try SECURE first, then COMMUNITY as fallback when DC capacity is low.
+        pod_data: dict | None = None
+        for cloud_type in ("SECURE", "COMMUNITY"):
+            for offer in candidates:
+                inp = {**base_inp, "cloudType": cloud_type, "gpuTypeId": offer.gpu_type_id}
+                try:
+                    data = await self._gql(mutation, {"input": inp}, api_key=volume_api_key)
+                    pod_data = data.get("podFindAndDeployOnDemand")
+                    if not pod_data:
+                        raise ProviderError("RunPod returned empty pod response", retryable=True)
+                except ProviderError as exc:
+                    if "no longer any instances available" in str(exc).lower() or "no instances available" in str(exc).lower():
+                        log.warning("runpod_gpu_no_capacity", gpu=offer.gpu, tier=tier, cloud=cloud_type)
+                        last_error = exc
+                        continue
+                    raise
+                if cloud_type == "COMMUNITY":
+                    log.info("runpod_community_fallback", gpu=offer.gpu, tier=tier)
+                break  # offer succeeded — break inner loop
+            else:
+                continue  # all offers for this cloud_type exhausted, try next
+            break  # pod launched — break outer loop
 
-            external_id = pod_data["id"]
-            cost = float(pod_data.get("machine", {}).get("costPerHr", offer.cost_per_hour_usd))
-            log.info("runpod_pod_launched", external_id=external_id, tier=tier, gpu=offer.gpu)
-
-            endpoint_url = await self._wait_for_endpoint(external_id)
-            return PodInfo(
-                external_id=external_id,
-                provider=self.name,
-                gpu=offer.gpu,
-                model=model,
-                cost_per_hour_usd=cost,
-                status="starting",
-                endpoint_url=endpoint_url,
+        if not pod_data:
+            raise ProviderError(
+                f"RunPod: no capacity across {len(candidates)} GPU type(s) for tier '{tier}' "
+                f"on SECURE or COMMUNITY cloud: {last_error}",
+                retryable=True,
             )
 
-        raise ProviderError(
-            f"RunPod: no capacity across {len(candidates)} GPU type(s) for tier '{tier}': {last_error}",
-            retryable=True,
+        external_id = pod_data["id"]
+        cost = float(pod_data.get("machine", {}).get("costPerHr", offer.cost_per_hour_usd))
+        log.info("runpod_pod_launched", external_id=external_id, tier=tier, gpu=offer.gpu)
+
+        endpoint_url = await self._wait_for_endpoint(external_id)
+        return PodInfo(
+            external_id=external_id,
+            provider=self.name,
+            gpu=offer.gpu,
+            model=model,
+            cost_per_hour_usd=cost,
+            status="starting",
+            endpoint_url=endpoint_url,
         )
 
     async def terminate(self, external_id: str) -> None:
@@ -306,7 +325,7 @@ class RunPodProvider(BaseProvider):
         expected_datacenter: str | None = None,
     ) -> None:
         data = await self._gql(
-            "{ myself { networkVolumes { id datacenterId } } }",
+            "{ myself { networkVolumes { id dataCenterId } } }",
             api_key=api_key,
         )
         volumes = data.get("myself", {}).get("networkVolumes", [])
@@ -319,7 +338,7 @@ class RunPodProvider(BaseProvider):
                 "Create one at runpod.io/console/user/storage or update your volume key."
             )
         if expected_datacenter:
-            actual_dc = vol.get("datacenterId", "")
+            actual_dc = vol.get("dataCenterId", "")
             if actual_dc != expected_datacenter:
                 raise VolumeValidationError(
                     f"RunPod volume '{volume_id}' is in datacenter '{actual_dc}', "
