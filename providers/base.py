@@ -107,7 +107,7 @@ TIER_MODEL: dict[str, str] = {
     "architecture": "qwen2.5-coder:32b-instruct-q4_K_M",
     "maximum":      "deepseek-v3:latest-q4_K_M",
     "ultra":        "qwen2.5:72b-instruct-q4_K_M",
-    "vision":       "llava:13b",
+    "vision":       "minicpm-v",
 }
 
 OLLAMA_PORT = 11434

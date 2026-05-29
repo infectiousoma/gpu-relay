@@ -245,6 +245,17 @@ class InstanceManager:
     def mark_active(self, pod_id: str) -> None:
         self._active_requests[pod_id] = self._active_requests.get(pod_id, 0) + 1
 
+    async def mark_pod_failed(self, pod_id: str) -> None:
+        """Mark a pod failed and evict from the tier cache. Called on inference errors."""
+        async with SessionLocal() as session:
+            p = await session.get(Pod, pod_id)
+            if p and p.status == PodStatus.ready:
+                p.status = PodStatus.failed
+                await session.commit()
+                if self._pods.get(p.tier) == p.id:
+                    self._pods.pop(p.tier, None)
+                log.warning("pod_marked_failed", pod_id=pod_id, tier=getattr(p, "tier", "?"))
+
     async def release(self, pod_id: str, session: AsyncSession) -> None:
         self._active_requests[pod_id] = max(0, self._active_requests.get(pod_id, 0) - 1)
         pod = await session.get(Pod, pod_id)
@@ -615,12 +626,19 @@ class InstanceManager:
                         try:
                             r = await client.get(f"{pod.endpoint_url}/api/tags")
                             if r.status_code == 200:
-                                async with SessionLocal() as session:
-                                    p = await session.get(Pod, pod.id)
-                                    if p:
-                                        p.health_failures = 0
-                                        await session.commit()
-                                continue
+                                # Also verify the model is actually loaded; Ollama
+                                # returns 200 with empty list when model was evicted.
+                                model_ok = True
+                                if pod.model:
+                                    loaded = [m.get("name", "") for m in r.json().get("models", [])]
+                                    model_ok = any(pod.model in m or m in pod.model for m in loaded)
+                                if model_ok:
+                                    async with SessionLocal() as session:
+                                        p = await session.get(Pod, pod.id)
+                                        if p:
+                                            p.health_failures = 0
+                                            await session.commit()
+                                    continue
                         except Exception:
                             pass
 

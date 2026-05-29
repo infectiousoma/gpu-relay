@@ -19,6 +19,7 @@ DELETE /v1/user/volume-keys/{id}   — delete a volume key
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 import uuid
@@ -482,13 +483,11 @@ async def _stream_response(
         except Exception as exc:
             error_message = str(exc)
             log.exception("stream_error", pod_id=pod.pod_id)
-            # Mark API provider pod failed so it's not reused on next request.
-            if "model_not_available" in error_message or "non-serverless" in error_message:
-                async with SessionLocal() as _s:
-                    _p = await _s.get(Pod, pod.pod_id)
-                    if _p:
-                        _p.status = PodStatus.failed
-                        await _s.commit()
+            # Mark pod failed so it's not reused on next request.
+            # API providers: model_not_available / non-serverless error bodies.
+            # Ollama pods: HTTP 404 means model was evicted from the container.
+            if any(s in error_message for s in ("model_not_available", "non-serverless", "HTTP 404")):
+                asyncio.create_task(manager.mark_pod_failed(pod.pod_id))
         finally:
             latency_ms = int(time.time() * 1000) - start_ms
             await manager.release(pod.pod_id, session)
@@ -565,7 +564,7 @@ async def _resolve_image_urls(messages: list) -> list[dict]:
 
 
 _VISION_SYSTEM_PROMPT = (
-    "You are a precise visual analyst. "
+    "You are a precise visual analyst. Always respond in English only. "
     "Describe exactly what you see: colors, shapes, visible text, objects, composition, character identities if recognizable. "
     "Do NOT fabricate details that are not visually present — no invented text, objects, or background elements. "
     "Report colors as they appear in the image. If a detail is unclear, say so rather than guessing."
