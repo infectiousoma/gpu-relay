@@ -45,7 +45,14 @@ class LocalProvider(BaseProvider):
     def tiers_allowed(self) -> list[str]:
         return _LEVEL_TIERS.get(settings.local_gpu_level, [])
 
-    async def launch(self, tier: str, user_label: str | None = None) -> PodInfo:
+    async def launch(
+        self,
+        tier: str,
+        user_label: str | None = None,
+        volume_id: str | None = None,
+        volume_api_key: str | None = None,
+        volume_datacenter: str | None = None,
+    ) -> PodInfo:
         allowed = self.tiers_allowed()
         if tier not in allowed:
             raise ProviderError(

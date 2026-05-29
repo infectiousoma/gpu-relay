@@ -97,7 +97,7 @@ def render() -> None:
     st.divider()
 
     # --- Cost trend chart ---
-    st.plotly_chart(cost_trend_chart(daily), use_container_width=True)
+    st.plotly_chart(cost_trend_chart(daily), use_container_width=True, key="overview_cost_trend")
 
     # --- Today by tier ---
     if today_tiers:
@@ -119,14 +119,16 @@ def render() -> None:
         st.plotly_chart(
             tier_pie_chart(distribution, value_col="requests"),
             use_container_width=True,
+            key="overview_tier_pie_requests",
         )
     with right:
         st.plotly_chart(
             tier_pie_chart(distribution, value_col="cost_usd"),
             use_container_width=True,
+            key="overview_tier_pie_cost",
         )
 
-    st.plotly_chart(usage_hours_bar(daily), use_container_width=True)
+    st.plotly_chart(usage_hours_bar(daily), use_container_width=True, key="overview_usage_hours")
 
     # --- Active instances ---
     if active_pods:

@@ -1,4 +1,4 @@
-"""User settings page — tier preferences, provider toggles, personal API keys."""
+"""User settings page — tier preferences, provider toggles, personal API keys, storage volumes."""
 
 from __future__ import annotations
 
@@ -8,13 +8,18 @@ from sqlalchemy import select
 from dashboard.db import (
     db_session,
     delete_user_provider_key,
+    delete_user_volume_key,
     get_user_provider_keys,
+    get_user_volume_keys,
     update_user_preferences,
     upsert_user_provider_key,
+    upsert_user_volume_key,
 )
 from database.models import User
 
 _ALL_PROVIDERS = ["openai", "groq", "together", "together_dedicated", "mistral", "deepseek", "runpod", "vast", "lambda", "local"]
+_API_PROVIDERS = ["openai", "groq", "together", "mistral", "deepseek"]
+_GPU_PROVIDERS = ["runpod", "vast", "lambda"]
 
 
 def render() -> None:
@@ -33,7 +38,7 @@ def render() -> None:
         if not user:
             st.error("User not found.")
             return
-        admin_ceiling = user.allowed_tiers  # None = all tiers allowed
+        admin_ceiling = user.allowed_tiers
         current_preferred = user.preferred_tiers or []
         current_disabled = user.disabled_providers or []
         current_provider_order = user.provider_order or []
@@ -44,7 +49,6 @@ def render() -> None:
     except Exception:
         all_tiers = ["simple", "architecture", "maximum", "ultra", "vision"]
 
-    # Tiers available to this user (respecting admin ceiling)
     available_tiers = [t for t in all_tiers if not admin_ceiling or t in admin_ceiling]
 
     # ----------------------------------------------------------------
@@ -82,8 +86,6 @@ def render() -> None:
         "Changes affect only your requests."
     )
 
-    # Default: if user has saved an order, show only those (excluded = disabled).
-    # If no saved order, show all enabled (respecting current_disabled).
     if current_provider_order:
         default_selection = [p for p in current_provider_order if p in _ALL_PROVIDERS]
     else:
@@ -114,48 +116,180 @@ def render() -> None:
     st.divider()
 
     # ----------------------------------------------------------------
-    # Section 3: Personal API keys
+    # Section 3: Commercial API keys (OpenAI, Groq, etc.)
     # ----------------------------------------------------------------
-    st.subheader("Personal API Keys")
+    st.subheader("Commercial API Keys")
     st.caption(
-        "Add your own API keys for cloud providers. When set, your key is used instead of "
-        "the shared admin key — no usage is charged to your account for those providers."
+        "Your own API key for commercial providers (OpenAI, Groq, etc.). "
+        "When set, your key is used for your requests instead of the shared admin key."
     )
 
     with db_session() as session:
         stored_keys = get_user_provider_keys(session, user_id)
     stored_by_provider = {k["provider"]: k for k in stored_keys}
 
-    api_providers = ["openai", "groq", "together", "mistral", "deepseek"]
-    for provider in api_providers:
-        has_key = provider in stored_by_provider
-        label = f"{'✅' if has_key else '➕'} {provider.title()}"
-        if has_key:
-            label += f"  *(saved {stored_by_provider[provider]['created_at'].strftime('%Y-%m-%d')})*"
+    for provider in _API_PROVIDERS:
+        _render_provider_key_form(provider, provider.title(), user_id, stored_by_provider)
 
-        with st.expander(label, expanded=False):
-            with st.form(key=f"key_form_{provider}"):
-                new_key = st.text_input(
-                    "API key" if not has_key else "Replace API key (leave blank to keep current)",
-                    type="password",
-                    placeholder=f"Enter {provider} API key...",
-                )
-                kcol1, kcol2 = st.columns(2)
-                save_pressed = kcol1.form_submit_button("Save key", type="primary")
-                delete_pressed = kcol2.form_submit_button("Remove key", type="secondary") if has_key else False
+    st.divider()
 
-                if save_pressed and new_key.strip():
-                    from bridge.crypto import encrypt_provider_key
-                    encrypted = encrypt_provider_key(new_key.strip())
-                    with db_session() as session:
-                        upsert_user_provider_key(session, user_id, provider, encrypted)
-                    st.session_state["settings_flash"] = f"{provider.title()} key saved."
-                    st.rerun()
-                elif save_pressed and not new_key.strip():
-                    st.warning("Enter a key to save.")
+    # ----------------------------------------------------------------
+    # Section 4: GPU Provider API Keys (RunPod, Vast, Lambda)
+    # ----------------------------------------------------------------
+    st.subheader("GPU Provider API Keys")
+    st.caption(
+        "Your own API key for GPU cloud providers. "
+        "When set, pods are launched using your account — GPU costs are billed to you directly. "
+        "If you also configure a storage volume below, this key is used for pod launch "
+        "unless the volume key specifies its own."
+    )
 
-                if delete_pressed:
-                    with db_session() as session:
-                        delete_user_provider_key(session, user_id, provider)
-                    st.session_state["settings_flash"] = f"{provider.title()} key removed."
-                    st.rerun()
+    with db_session() as session:
+        stored_keys = get_user_provider_keys(session, user_id)
+    stored_by_provider = {k["provider"]: k for k in stored_keys}
+
+    for provider in _GPU_PROVIDERS:
+        _render_provider_key_form(provider, provider.title(), user_id, stored_by_provider)
+
+    st.divider()
+
+    # ----------------------------------------------------------------
+    # Section 5: Storage Volumes
+    # ----------------------------------------------------------------
+    st.subheader("Storage Volumes")
+    st.caption(
+        "Register a persistent network volume for GPU providers. "
+        "Speeds up cold starts by caching model weights across pod launches (~30 s vs 5–15 min). "
+        "The volume API key overrides the GPU provider key above for volume validation and pod launch."
+    )
+
+    with db_session() as session:
+        stored_volumes = get_user_volume_keys(session, user_id)
+    stored_vol_by_provider = {v["provider"]: v for v in stored_volumes}
+
+    for provider in _GPU_PROVIDERS:
+        _render_volume_key_form(provider, user_id, stored_vol_by_provider)
+
+
+# ----------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------
+
+def _render_provider_key_form(provider: str, label: str, user_id: str, stored_by_provider: dict) -> None:
+    has_key = provider in stored_by_provider
+    expander_label = f"{'✅' if has_key else '➕'} {label}"
+    if has_key:
+        expander_label += f"  *(saved {stored_by_provider[provider]['created_at'].strftime('%Y-%m-%d')})*"
+
+    with st.expander(expander_label, expanded=False):
+        with st.form(key=f"key_form_{provider}"):
+            new_key = st.text_input(
+                "API key" if not has_key else "Replace API key (leave blank to keep current)",
+                type="password",
+                placeholder=f"Enter {label} API key...",
+            )
+            kcol1, kcol2 = st.columns(2)
+            save_pressed = kcol1.form_submit_button("Save key", type="primary")
+            delete_pressed = kcol2.form_submit_button("Remove key", type="secondary") if has_key else False
+
+            if save_pressed and new_key.strip():
+                from bridge.crypto import encrypt_provider_key
+                encrypted = encrypt_provider_key(new_key.strip())
+                with db_session() as session:
+                    upsert_user_provider_key(session, user_id, provider, encrypted)
+                st.session_state["settings_flash"] = f"{label} key saved."
+                st.rerun()
+            elif save_pressed and not new_key.strip():
+                st.warning("Enter a key to save.")
+
+            if delete_pressed:
+                with db_session() as session:
+                    delete_user_provider_key(session, user_id, provider)
+                st.session_state["settings_flash"] = f"{label} key removed."
+                st.rerun()
+
+
+def _render_volume_key_form(provider: str, user_id: str, stored_vol_by_provider: dict) -> None:
+    has_vol = provider in stored_vol_by_provider
+    existing = stored_vol_by_provider.get(provider, {})
+    label = f"{'✅' if has_vol else '➕'} {provider.title()}"
+    if has_vol:
+        vid = existing["volume_id"]
+        vid_short = vid[:12] + "…" if len(vid) > 12 else vid
+        dc = existing.get("datacenter") or "any DC"
+        label += f"  *({vid_short}, {dc}, saved {existing['created_at'].strftime('%Y-%m-%d')})*"
+
+    with st.expander(label, expanded=False):
+        with st.form(key=f"vol_form_{provider}"):
+            vol_id = st.text_input(
+                "Volume ID",
+                value=existing.get("volume_id", ""),
+                placeholder="e.g. abc12345",
+            )
+            api_key_input = st.text_input(
+                "API key" if not has_vol else "API key (leave blank to keep current)",
+                type="password",
+                placeholder=f"Enter {provider.title()} API key for this volume…",
+            )
+            datacenter = st.text_input(
+                "Datacenter (optional)",
+                value=existing.get("datacenter") or "",
+                placeholder="e.g. EU-RO-1 — constrains pod to this DC, enables DC validation",
+            )
+
+            vc1, vc2 = st.columns(2)
+            save = vc1.form_submit_button("Save volume", type="primary")
+            remove = vc2.form_submit_button("Remove", type="secondary") if has_vol else False
+
+            if save:
+                if not vol_id.strip():
+                    st.warning("Volume ID is required.")
+                elif not api_key_input.strip() and not has_vol:
+                    st.warning("API key is required for a new volume key.")
+                else:
+                    from bridge.crypto import decrypt_provider_key, encrypt_provider_key
+
+                    validation_err = None
+                    if provider == "runpod":
+                        plaintext_key = api_key_input.strip()
+                        if not plaintext_key and has_vol:
+                            with db_session() as _s:
+                                from database.models import UserVolumeKey as _UVK
+                                _row = _s.execute(
+                                    select(_UVK).where(
+                                        _UVK.user_id == user_id,
+                                        _UVK.provider == provider,
+                                    )
+                                ).scalar_one_or_none()
+                                if _row:
+                                    plaintext_key = decrypt_provider_key(_row.api_key_encrypted)
+
+                        if plaintext_key:
+                            from bridge.runpod_validate import validate_runpod_volume
+                            try:
+                                validation_err = validate_runpod_volume(
+                                    vol_id.strip(),
+                                    plaintext_key,
+                                    datacenter.strip() or None,
+                                )
+                            except Exception as e:
+                                validation_err = f"Validation error: {e}"
+
+                    if validation_err:
+                        st.error(validation_err)
+                    else:
+                        encrypted = encrypt_provider_key(api_key_input.strip()) if api_key_input.strip() else None
+                        with db_session() as session:
+                            upsert_user_volume_key(
+                                session, user_id, provider,
+                                vol_id.strip(), encrypted,
+                                datacenter.strip() or None,
+                            )
+                        st.session_state["settings_flash"] = f"{provider.title()} volume key saved."
+                        st.rerun()
+
+            if remove:
+                with db_session() as session:
+                    delete_user_volume_key(session, existing["id"], user_id)
+                st.session_state["settings_flash"] = f"{provider.title()} volume key removed."
+                st.rerun()

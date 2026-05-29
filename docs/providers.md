@@ -26,21 +26,31 @@ PROVIDER_PRIORITY=runpod
 
 Pods launch on demand and terminate after `idle_timeout_sec` of inactivity. No cost while idle.
 
-**GPU fallback**: if the preferred GPU (e.g. RTX 4090) has no capacity at deploy time, the bridge automatically tries the next viable GPU type in preference order (`TIER_GPU_PREFERENCE` in `providers/base.py`) before failing. Returns 503 to the client only when all candidates are exhausted. Preference order for each tier:
+**GPU fallback**: if the preferred GPU has no secure-cloud capacity, the bridge tries every viable GPU type in preference order, then retries all candidates on community cloud before failing. Returns 503 only when all candidates are exhausted on both cloud types.
 
-| Tier | GPU preference order |
-|------|----------------------|
-| `simple` / `architecture` / `vision` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest ≥8 GB |
-| `maximum` | L40S → L40 → A40 → A100 40GB → cheapest ≥38 GB |
-| `ultra` | A100 80GB → H100 → cheapest ≥50 GB |
+| Tier | GPU preference order | VRAM range |
+|------|----------------------|------------|
+| `simple` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest in range | 8–24 GB |
+| `vision` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest in range | 10–24 GB |
+| `architecture` | RTX 4090 → RTX 3090 → A40 → A6000 → cheapest ≥20 GB | ≥20 GB |
+| `maximum` | L40S → L40 → A40 → A100 40GB → cheapest ≥38 GB | ≥38 GB |
+| `ultra` | A100 80GB → H100 → cheapest ≥50 GB | ≥50 GB |
+
+The VRAM cap on `simple` and `vision` prevents those tiers from landing on datacenter-class GPUs (A100, H100, H200) when preferred types are sold out — which would be 5–10× the cost with no benefit for a 7B/13B model.
+
+**Community cloud fallback**: after all SECURE candidates are exhausted, the bridge retries with `cloudType: COMMUNITY` (same GPU types, shared/interruptible nodes). Community pods are lower cost but can be preempted. A `runpod_community_fallback` log event is emitted when this path is taken.
 
 Cold starts pull the Docker image + model on first use:
 - 7B model: ~3–5 min first run, ~30 s with network volume
 - 32B model: ~10–15 min first run, ~30 s with network volume
 
-### Optional: Persistent Model Cache
+### Persistent Model Cache
 
 Without a network volume, models re-download on every cold start.
+
+There are two ways to configure persistent storage: a **global env volume** (shared by all users) or **per-user volume keys** (each user registers their own volume).
+
+#### Global env volume (shared)
 
 1. Verify the stack works without a volume first
 2. **Choose a datacenter** — see note below before creating the volume
@@ -53,9 +63,64 @@ Cost: ~$7–8/month. Cuts cold starts from minutes to ~30 s.
 
 > **Warning:** If you delete the volume, clear `RUNPOD_NETWORK_VOLUME_ID` from `.env`. A stale ID causes every launch to fail.
 
+#### Per-user volume keys
+
+Users can register their own RunPod network volume via the API. When a user has a volume key for a provider, it takes precedence over the global env volume for their requests.
+
+```http
+POST /v1/user/volume-keys
+Authorization: Bearer <user-token>
+Content-Type: application/json
+
+{
+  "provider": "runpod",
+  "volume_id": "abc12345",
+  "api_key": "<runpod-api-key>",
+  "datacenter": "EU-RO-1"
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `provider` | yes | `runpod`, `vast`, or `lambda` |
+| `volume_id` | yes | The volume ID from RunPod Storage |
+| `api_key` | yes | RunPod API key that owns the volume |
+| `datacenter` | no | RunPod datacenter ID (e.g. `EU-RO-1`); if set, the launch is constrained to that DC and validated before launch |
+
+The `api_key` is encrypted at rest using the same Fernet key as provider keys (`PROVIDER_KEY_SECRET`).
+
+**Key validation:** When saving a volume key in the dashboard Settings page, the API key and volume ID are validated against RunPod's API before storing. Invalid keys or volume IDs are rejected immediately — nothing is saved until the validation passes.
+
+**DC validation:** If `datacenter` is set, the bridge calls `{ myself { networkVolumes { id dataCenterId } } }` using the user's key before every launch. If the volume's actual `dataCenterId` doesn't match, the launch returns HTTP 400 immediately — no fallback to other providers.
+
+Other endpoints:
+```http
+GET    /v1/user/volume-keys          # list (no decrypted api_key in response)
+DELETE /v1/user/volume-keys/{id}     # remove
+```
+
+#### Admin: volume storage policy
+
+Control what happens when a user's request arrives but no user volume key is configured for the provider:
+
+```bash
+llmctl users storage <email>                          # show current policy + keys
+llmctl users storage <email> --policy use_env         # fall back to RUNPOD_NETWORK_VOLUME_ID (default)
+llmctl users storage <email> --policy stateless       # launch without any volume
+llmctl users storage <email> --policy block           # reject request with HTTP 400
+llmctl users storage <email> --no-allow-env           # prevent use of env volume even with use_env policy
+llmctl users storage <email> --allow-env              # restore env volume access
+```
+
+| Policy | Effect when no user volume key found |
+|--------|--------------------------------------|
+| `use_env` | Use `RUNPOD_NETWORK_VOLUME_ID` if `allow_env_storage=True` and var is set; otherwise launch stateless |
+| `stateless` | Launch without any volume; models re-download on every cold start |
+| `block` | Fail immediately with HTTP 400; no fallback to other providers |
+
 #### Datacenter selection
 
-RunPod pods launch in whichever datacenter has capacity for the requested GPU type — no datacenter is pinned in the launch request. When `RUNPOD_NETWORK_VOLUME_ID` is set, RunPod **constrains every pod to the same datacenter as the volume**. There is no cross-datacenter fallback: if that datacenter runs out of your target GPU type, all launches fail until capacity returns.
+RunPod pods launch in whichever datacenter has capacity for the requested GPU type — no datacenter is pinned in the launch request. When a volume is used (env or user-supplied), RunPod **constrains every pod to the same datacenter as the volume**. There is no cross-datacenter fallback: if that datacenter runs out of your target GPU type, all launches fail until capacity returns.
 
 Choose a datacenter that has:
 - Reliable availability of your tiers' preferred GPU (RTX 4090 for `simple`/`architecture`, L40S for `maximum`, A100 80GB for `ultra`)
