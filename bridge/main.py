@@ -149,18 +149,21 @@ async def healthz():
 # ---------------------------------------------------------------------------
 
 @app.get("/v1/models", response_model=ModelsResponse)
-async def list_models(user: CurrentUser):
+async def list_models(user: CurrentUser, request: Request):
     await check_rpm(user.id, get_redis())
     import yaml
     with open(settings.tiers_config_path) as f:
         tiers = yaml.safe_load(f)["tiers"]
 
+    _manager: InstanceManager = request.app.state.manager
     now_ts = int(time.time())
     models = [
         ModelInfo(id=f"llm-{name}", created=now_ts)
         for name in tiers
     ]
     models.insert(0, ModelInfo(id="llm-auto", created=now_ts))
+    if _manager.is_provider_available("local"):
+        models.insert(1, ModelInfo(id="llm-local", created=now_ts))
     for wm in WORKFLOW_MODELS.values():
         models.append(ModelInfo(id=wm["id"], created=now_ts))
     return ModelsResponse(data=models)
@@ -253,7 +256,7 @@ async def chat_completions(
         body, pipeline_meta = await run_pipeline(body, pipeline)
 
     # --- Acquire pod ---
-    provider_override = request.headers.get("x-provider") or None
+    provider_override = request.headers.get("x-provider") or decision.provider_override or None
     _disabled = list(user.disabled_providers or [])
     if not getattr(user, "allow_local", True):
         _disabled = list({*_disabled, "local"})

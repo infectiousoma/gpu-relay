@@ -181,6 +181,15 @@ async def select_tier(
             detail="Vision tier is not available for this user or configuration.",
         )
 
+    # 1a. llm-local — force local provider, route to simple tier, skip budget gate
+    if model_field == "local":
+        return RoutingDecision(
+            tier="simple",
+            reason="local_model_requested",
+            projected_cost_usd=0.0,
+            provider_override="local",
+        )
+
     # 1. Explicit override
     override = (
         http_request.headers.get("x-tier")

@@ -242,6 +242,10 @@ class InstanceManager:
         finally:
             self._spinning_tiers.discard(tier)
 
+    def is_provider_available(self, name: str) -> bool:
+        provider = self._providers.get(name)
+        return provider is not None and provider.is_configured()
+
     def mark_active(self, pod_id: str) -> None:
         self._active_requests[pod_id] = self._active_requests.get(pod_id, 0) + 1
 

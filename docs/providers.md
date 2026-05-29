@@ -146,6 +146,16 @@ Uses `OLLAMA_LOCAL_URL` (default: `http://ollama:11434`, the stack's built-in Ol
 
 **CPU-only:** Remove the `deploy:` GPU block from the `ollama` service in `docker-compose.yml`. A 7B q4 model on CPU takes ~30–60 s per request.
 
+**`llm-local` model**: Selecting `llm-local` in Open WebUI (or sending `model=llm-local` to the API) forces the request directly to local Ollama, bypassing all cloud providers regardless of tier `provider_overrides`. Zero cost, instant routing — useful for Open WebUI background tasks (title generation, auto-tagging) to avoid spinning up cloud pods.
+
+**Access control**: Local provider access is off by default (`allow_local=False`). Enable per user:
+```bash
+llmctl users local-access <email> --allow
+llmctl users local-access <email> --deny
+```
+
+`llm-local` only appears in the model list when the local provider is configured and `is_configured()` returns true.
+
 ---
 
 ## Commercial APIs

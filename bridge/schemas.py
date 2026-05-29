@@ -102,6 +102,7 @@ class RoutingDecision(BaseModel):
     projected_cost_usd: float
     requires_pod: bool = True
     downgraded_from: str | None = None
+    provider_override: str | None = None
 
 
 class PodHandle(BaseModel):

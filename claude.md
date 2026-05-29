@@ -35,7 +35,7 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 | architecture | qwen2.5-coder:32b-instruct-q4_K_M | RTX 4090 | ~0.69 |
 | maximum | deepseek-v3:latest-q4_K_M | L40S | ~1.14 |
 | ultra | qwen2.5:72b-instruct-q4_K_M | A100 80GB | ~1.89 |
-| vision | Llama-3.2-11B-Vision (Together dedicated) / llava:34b (RunPod) | L40/A100 | ~1.49–2.40 |
+| vision | Llama-3.2-11B-Vision (Together dedicated) / MiniCPM-V (RunPod) | L40/RTX 4090 | ~0.69–1.49 |
 
 Pod provider prices synced from live RunPod GPU catalog at startup.
 
@@ -128,6 +128,7 @@ Preprocessing rewrites user prompt via local Ollama 7B → structured JSON befor
 ## Routing (priority order)
 
 0. Image content detected + model doesn't support vision → `vision` tier
+0a. `llm-local` model → `simple` tier with `provider_override="local"` (bypasses cloud, zero cost)
 1. `X-Tier` header / `?tier=` param
 2. Per-user `allowed_tiers` whitelist
 3. Budget gate (downgrade or 402)
@@ -171,6 +172,11 @@ Users can configure per-request behavior without admin intervention:
 - **Volume keys** — per-provider persistent storage volume registrations in `user_volume_keys`. See Volume Storage section above.
 
 Admin ceiling (`allowed_tiers` via `llmctl users tiers`) always trumps user preferences.
+
+**Local provider access** is off by default (`allow_local=False`). Enable per-user:
+```bash
+llmctl users local-access <email> --allow
+```
 
 ## Multi-tenancy
 
