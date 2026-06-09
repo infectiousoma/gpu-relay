@@ -181,3 +181,10 @@ llmctl users local-access <email> --allow
 ## Multi-tenancy
 
 JWT or `sk-llm-...` API key auth. Per-user quotas (RPM/TPD/USD), `allowed_tiers` whitelist, prepaid/postpaid billing.
+
+## Docs & Website
+
+- `docs/index.html` — single-page GitHub Pages site (Lain cyberpunk aesthetic, inline CSS/JS, no build step)
+- `docs/screenshots/` — PNG files auto-loaded by the gallery section
+- `docs/deployment.md` — how to enable GitHub Pages, GitHub Wiki sync, Netlify/Vercel/nginx alternatives
+- Enable Pages: repo Settings → Pages → branch `master` → folder `/docs`
