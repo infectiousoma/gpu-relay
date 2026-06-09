@@ -18,6 +18,7 @@ Multi-tenant, OpenAI-compatible LLM gateway. Route requests to cloud GPU pods (R
 - [Embeddings](docs/embeddings.md)
 - [Preprocessing Pipeline](docs/pipeline.md)
 - [Development & Architecture](docs/development.md)
+- [Website & Wiki Deployment](docs/deployment.md) — GitHub Pages, Netlify, Vercel, GitHub Wiki
 
 ## Quickstart
 
