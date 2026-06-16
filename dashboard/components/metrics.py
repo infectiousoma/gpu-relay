@@ -61,7 +61,7 @@ def status_badge(status: str) -> str:
 
 
 def tier_badge(tier: str) -> str:
-    icons = {"simple": "⚡", "architecture": "🏗️", "maximum": "🚀", "ultra": "💎"}
+    icons = {"simple": "⚡", "mid": "⚙️", "architecture": "🏗️", "maximum": "🚀", "ultra": "💎"}
     return f"{icons.get(tier, '❓')} {tier}"
 
 

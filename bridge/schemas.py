@@ -24,6 +24,7 @@ class ChatMessage(BaseModel):
     content: MessageContent
     name: str | None = None
     tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
 
     def text_content(self) -> str:
         """Flatten content to plain text for routing/preprocessing/token estimation."""
@@ -43,6 +44,8 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     stop: list[str] | str | None = None
     user: str | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
     # Bridge extensions (ignored by upstream OpenAI clients):
     files_referenced: int | None = Field(default=None, ge=0, description="Hint for router")
     pipeline: str | None = Field(default=None, description="e.g. 'preprocess,infer'")

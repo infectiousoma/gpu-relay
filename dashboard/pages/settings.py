@@ -47,7 +47,7 @@ def render() -> None:
         from bridge.router import get_tiers
         all_tiers = list(get_tiers().keys())
     except Exception:
-        all_tiers = ["simple", "architecture", "maximum", "ultra", "vision"]
+        all_tiers = ["simple", "mid", "architecture", "maximum", "ultra", "vision"]
 
     available_tiers = [t for t in all_tiers if not admin_ceiling or t in admin_ceiling]
 

@@ -27,7 +27,7 @@ from database.models import User
 
 log = structlog.get_logger(__name__)
 
-TIER_ORDER = ["simple", "architecture", "maximum", "ultra"]
+TIER_ORDER = ["simple", "mid", "architecture", "maximum", "ultra"]
 
 _POD_PROVIDERS = {"runpod", "vast", "lambda"}
 

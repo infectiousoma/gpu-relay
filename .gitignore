@@ -16,6 +16,7 @@ env/
 # Environment / secrets
 .env
 *.env.local
+config/ccr-config.json
 
 # Test / coverage
 .pytest_cache/

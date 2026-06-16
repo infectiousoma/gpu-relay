@@ -360,7 +360,8 @@ async def chat_completions(
             completion_tokens = max(1, len(completion_text) // 4)
         else:
             # --- Standard non-streaming ---
-            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved_messages)
+            _tier_max = get_tiers().get(decision.tier, {}).get("max_context_tokens")
+            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved_messages, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS)
             async with httpx.AsyncClient(timeout=300) as client:
                 r = await client.post(
                     f"{pod.endpoint_url}/v1/chat/completions",
@@ -453,7 +454,8 @@ async def _stream_response(
         if pod.provider not in _OLLAMA_PROVIDERS:
             base = _sanitize_messages_for_api_vision(base)
         resolved = _inject_vision_system(base)
-    payload = _build_inference_payload(body, stream=True, model=pod.model or None, messages=resolved)
+    _tier_max = get_tiers().get(decision.tier, {}).get("max_context_tokens")
+    payload = _build_inference_payload(body, stream=True, model=pod.model or None, messages=resolved, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS)
 
     async def event_generator():
         start_ms = int(time.time() * 1000)
@@ -638,24 +640,61 @@ def _sanitize_messages_for_api_vision(messages: list) -> list:
     return result
 
 
+def _slim_tools(tools: list[dict]) -> list[dict]:
+    """Strip description fields from tool definitions to reduce token count for API providers."""
+    slimmed = []
+    for tool in tools:
+        t = dict(tool)
+        fn = dict(t.get("function", {}))
+        fn.pop("description", None)
+        params = fn.get("parameters", {})
+        if isinstance(params, dict) and "properties" in params:
+            slimmed_props = {}
+            for name, prop in params["properties"].items():
+                p = dict(prop)
+                p.pop("description", None)
+                slimmed_props[name] = p
+            fn = dict(fn)
+            fn["parameters"] = {**params, "properties": slimmed_props}
+        t["function"] = fn
+        slimmed.append(t)
+    return slimmed
+
+
 def _build_inference_payload(
     body: ChatCompletionRequest,
     *,
     stream: bool,
     model: str | None = None,
     messages: list | None = None,
+    max_tokens_cap: int | None = None,
+    slim_tools: bool = False,
 ) -> dict:
+    def _serialize_message(m: ChatMessage) -> dict:
+        d: dict = {"role": m.role, "content": m.content}
+        if m.name is not None:
+            d["name"] = m.name
+        if m.tool_call_id is not None:
+            d["tool_call_id"] = m.tool_call_id
+        if m.tool_calls is not None:
+            d["tool_calls"] = m.tool_calls
+        return d
+
     payload: dict = {
         "model": model or body.model,
-        "messages": messages if messages is not None else [{"role": m.role, "content": m.content} for m in body.messages],
+        "messages": messages if messages is not None else [_serialize_message(m) for m in body.messages],
         "stream": stream,
     }
     if body.temperature is not None:
         payload["temperature"] = body.temperature
     if body.max_tokens is not None:
-        payload["max_tokens"] = body.max_tokens
+        payload["max_tokens"] = min(body.max_tokens, max_tokens_cap) if max_tokens_cap else body.max_tokens
     if body.stop is not None:
         payload["stop"] = body.stop
+    if body.tools is not None:
+        payload["tools"] = _slim_tools(body.tools) if slim_tools else body.tools
+    if body.tool_choice is not None:
+        payload["tool_choice"] = body.tool_choice
     return payload
 
 

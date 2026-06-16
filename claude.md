@@ -5,12 +5,15 @@ Multi-tenant OpenAI-compatible bridge that routes requests to GPU providers runn
 ## Architecture
 
 ```
-Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Provider → Ollama/API
-                                       ↓
-                              Local Ollama (preprocessor + embeddings)
-                                       ↓
-                              Postgres (state/billing) + Redis (quota/cache)
+Claude Code → ccr (port 3456) → Bridge (FastAPI :8000) → Router → InstanceManager → Provider → Ollama/API
+Other clients ──────────────────────────────────────────────↑
+                                                          ↓
+                                               Local Ollama (preprocessor + embeddings)
+                                                          ↓
+                                               Postgres (state/billing) + Redis (quota/cache)
 ```
+
+**CCR (claude-code-router):** optional Docker service (`docker/Dockerfile.ccr`) that sits between Claude Code and the bridge. Converts Anthropic API format ↔ OpenAI format. Activate with `source scripts/ccr-activate.sh`, then run `claude`. Config template: `config/ccr-config.json.example`. See `docs/ccr.md`.
 
 **Key files:**
 - `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin; `_resolve_image_urls()` fetches external image URLs → base64 data URIs before forwarding to Ollama
@@ -32,10 +35,13 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 | Tier | Model | GPU | $/hr |
 |------|-------|-----|------|
 | simple | qwen2.5-coder:7b-instruct-q4_K_M | RTX 4090 | ~0.69 |
+| mid | gemma4-coder:12b-q4_K_M | RTX 4090 | ~0.69 |
 | architecture | qwen2.5-coder:32b-instruct-q4_K_M | RTX 4090 | ~0.69 |
 | maximum | deepseek-v3:latest-q4_K_M | L40S | ~1.14 |
 | ultra | qwen2.5:72b-instruct-q4_K_M | A100 80GB | ~1.89 |
 | vision | Llama-3.2-11B-Vision (Together dedicated) / MiniCPM-V (RunPod) | L40/RTX 4090 | ~0.69–1.49 |
+
+`TIER_ORDER` in `bridge/router.py` must list tiers in ascending capability order. `mid` sits between `simple` and `architecture`.
 
 Pod provider prices synced from live RunPod GPU catalog at startup.
 
@@ -129,13 +135,15 @@ Preprocessing rewrites user prompt via local Ollama 7B → structured JSON befor
 
 0. Image content detected + model doesn't support vision → `vision` tier
 0a. `llm-local` model → `simple` tier with `provider_override="local"` (bypasses cloud, zero cost)
-1. `X-Tier` header / `?tier=` param
+1. `X-Tier` header / `?tier=` param (ccr passes tier as model name, e.g. `model: "architecture"`)
 2. Per-user `allowed_tiers` whitelist
 3. Budget gate (downgrade or 402)
 4. Token count thresholds
 5. File count thresholds
 6. Complexity keywords
 7. Default: simple
+
+**Tool definition stripping** (`_slim_tools` in `main.py`): when forwarding to non-Ollama providers (groq, openai, etc.), description fields are stripped from tool definitions and property schemas before the request is sent. This cuts Claude Code's tool payload from ~64K tokens to ~5K, critical for staying within API provider TPM limits.
 
 ## Key Env Vars
 
