@@ -361,7 +361,7 @@ async def chat_completions(
         else:
             # --- Standard non-streaming ---
             _tier_max = get_tiers().get(decision.tier, {}).get("max_context_tokens")
-            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved_messages, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS)
+            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved_messages, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS, provider=pod.provider)
             async with httpx.AsyncClient(timeout=300) as client:
                 r = await client.post(
                     f"{pod.endpoint_url}/v1/chat/completions",
@@ -455,7 +455,7 @@ async def _stream_response(
             base = _sanitize_messages_for_api_vision(base)
         resolved = _inject_vision_system(base)
     _tier_max = get_tiers().get(decision.tier, {}).get("max_context_tokens")
-    payload = _build_inference_payload(body, stream=True, model=pod.model or None, messages=resolved, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS)
+    payload = _build_inference_payload(body, stream=True, model=pod.model or None, messages=resolved, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS, provider=pod.provider)
 
     async def event_generator():
         start_ms = int(time.time() * 1000)
@@ -640,22 +640,28 @@ def _sanitize_messages_for_api_vision(messages: list) -> list:
     return result
 
 
+def _strip_schema_verbosity(obj: object) -> object:
+    """Recursively remove description and $schema fields from JSON schema objects."""
+    if isinstance(obj, dict):
+        return {
+            k: _strip_schema_verbosity(v)
+            for k, v in obj.items()
+            if k not in ("description", "$schema")
+        }
+    if isinstance(obj, list):
+        return [_strip_schema_verbosity(v) for v in obj]
+    return obj
+
+
 def _slim_tools(tools: list[dict]) -> list[dict]:
-    """Strip description fields from tool definitions to reduce token count for API providers."""
+    """Strip description/$schema fields from tool definitions to reduce token count for API providers."""
     slimmed = []
     for tool in tools:
         t = dict(tool)
         fn = dict(t.get("function", {}))
         fn.pop("description", None)
-        params = fn.get("parameters", {})
-        if isinstance(params, dict) and "properties" in params:
-            slimmed_props = {}
-            for name, prop in params["properties"].items():
-                p = dict(prop)
-                p.pop("description", None)
-                slimmed_props[name] = p
-            fn = dict(fn)
-            fn["parameters"] = {**params, "properties": slimmed_props}
+        if "parameters" in fn:
+            fn["parameters"] = _strip_schema_verbosity(fn["parameters"])
         t["function"] = fn
         slimmed.append(t)
     return slimmed
@@ -669,6 +675,7 @@ def _build_inference_payload(
     messages: list | None = None,
     max_tokens_cap: int | None = None,
     slim_tools: bool = False,
+    provider: str | None = None,
 ) -> dict:
     def _serialize_message(m: ChatMessage) -> dict:
         d: dict = {"role": m.role, "content": m.content}
@@ -688,7 +695,10 @@ def _build_inference_payload(
     if body.temperature is not None:
         payload["temperature"] = body.temperature
     if body.max_tokens is not None:
-        payload["max_tokens"] = min(body.max_tokens, max_tokens_cap) if max_tokens_cap else body.max_tokens
+        _mt = min(body.max_tokens, max_tokens_cap) if max_tokens_cap else body.max_tokens
+        if provider == "groq":
+            _mt = min(_mt, settings.groq_max_output_tokens)
+        payload["max_tokens"] = _mt
     if body.stop is not None:
         payload["stop"] = body.stop
     if body.tools is not None:

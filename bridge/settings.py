@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     openai_model_maximum: str = ""
     openai_model_ultra: str = ""
     groq_api_key: str = ""
+    groq_max_output_tokens: int = 6000  # groq free tier TPM = input + max_tokens; cap output to stay under 12K
     together_api_key: str = ""
     mistral_api_key: str = ""
     deepseek_api_key: str = ""
