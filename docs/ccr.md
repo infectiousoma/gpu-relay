@@ -97,9 +97,22 @@ The bridge API key is created once via `POST /auth/keys` (requires login JWT). I
 
 ## Tool Calling
 
-ccr converts Claude Code's Anthropic-format tool definitions to OpenAI format before forwarding to the bridge. The bridge then strips verbose descriptions from tool schemas (`_slim_tools` in `bridge/main.py`) before sending to external API providers like Groq — this is critical: Claude Code sends 20+ tools with detailed descriptions (~64K tokens), which would exceed Groq's free-tier TPM limit.
+ccr converts Claude Code's Anthropic-format tool definitions to OpenAI format before forwarding to the bridge. The bridge strips verbose descriptions from tool schemas (`_slim_tools` in `bridge/main.py`) before forwarding to **all** providers — this is applied unconditionally, including Ollama/RunPod. Claude Code sends 26+ tools with long descriptions (~64K tokens); stripping cuts this to ~5K, which:
+- Keeps requests within Groq's free-tier TPM limit
+- Prevents Cloudflare 524 timeout on RunPod — full schemas caused 126s+ generation time for 32B models, exceeding Cloudflare's ~100s proxy timeout
 
 Tool calls return as `tool_calls` in OpenAI format; ccr converts them back to Anthropic `tool_use` blocks for Claude Code.
+
+## Two-Model Routing (Ollama tiers)
+
+For Ollama-backed tiers (RunPod, Vast, local), the bridge routes to different models based on whether the request includes tool definitions:
+
+| Request type | Model used |
+|---|---|
+| Has tools (Claude Code tool-call session) | `model` in tiers.yaml (e.g. `qwen2.5:32b-instruct-q4_K_M`) |
+| No tools (plain chat, title generation) | `model_no_tools` in tiers.yaml (e.g. `qwen2.5-coder:32b-instruct-q4_K_M`) |
+
+The `architecture` tier uses `qwen2.5:32b` for tool sessions because the instruct variant handles tool call JSON correctly, and falls back to `qwen2.5-coder:32b` for plain chat (faster text generation). If the coder model isn't pulled on the pod yet, the bridge falls back to the primary model automatically.
 
 ---
 
