@@ -147,6 +147,7 @@ class User(Base):
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="user")
     provider_keys: Mapped[list["UserProviderKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     volume_keys: Mapped[list["UserVolumeKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    tier_overrides: Mapped[list["UserTierOverride"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("monthly_budget_usd >= 0", name="ck_users_budget_nonneg"),
@@ -205,6 +206,29 @@ class UserVolumeKey(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uq_user_volume_provider"),
     )
+
+
+class UserTierOverride(Base):
+    """Per-user per-tier configuration overrides (provider order, models, timeouts)."""
+
+    __tablename__ = "user_tier_overrides"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    tier: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_order: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
+    disabled_providers: Mapped[list[str] | None] = mapped_column(_sa.JSON, nullable=True, default=None)
+    provider_models: Mapped[dict | None] = mapped_column(_sa.JSON, nullable=True, default=None)
+    model_override: Mapped[str | None] = mapped_column(String(256), nullable=True, default=None)
+    model_no_tools_override: Mapped[str | None] = mapped_column(String(256), nullable=True, default=None)
+    idle_timeout_sec: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    max_context_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="tier_overrides")
+
+    __table_args__ = (UniqueConstraint("user_id", "tier", name="uq_user_tier_override"),)
 
 
 class Quota(Base):

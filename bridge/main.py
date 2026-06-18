@@ -2,19 +2,24 @@
 
 Routes
 ------
-GET  /healthz                      — liveness probe
-GET  /v1/models                    — list tiers as model objects
-POST /v1/chat/completions          — main inference (streaming + non-streaming)
-POST /v1/embeddings                — embeddings via local Ollama (no GPU cost)
-POST /auth/login                   — issue JWT
-POST /auth/keys                    — create API key (returns plaintext once)
-DELETE /auth/keys/{key_id}         — revoke API key
-GET  /admin/pods                   — list pods (admin)
-DELETE /admin/pods/{pod_id}        — force terminate pod (admin)
-GET  /admin/users                  — list users (admin)
-GET  /v1/user/volume-keys          — list user's volume keys
-POST /v1/user/volume-keys          — add/update a volume key
-DELETE /v1/user/volume-keys/{id}   — delete a volume key
+GET  /healthz                          — liveness probe
+GET  /v1/models                        — list tiers as model objects
+POST /v1/chat/completions              — main inference (streaming + non-streaming)
+POST /v1/embeddings                    — embeddings via local Ollama (no GPU cost)
+POST /auth/login                       — issue JWT
+GET  /auth/keys                        — list user's API keys
+POST /auth/keys                        — create API key (returns plaintext once)
+DELETE /auth/keys/{key_id}             — revoke API key
+GET  /v1/user/tier-overrides           — list all tier overrides for user
+GET  /v1/user/tier-overrides/{tier}    — get tier override
+PUT  /v1/user/tier-overrides/{tier}    — upsert tier override
+DELETE /v1/user/tier-overrides/{tier}  — delete tier override
+GET  /admin/pods                       — list pods (admin)
+DELETE /admin/pods/{pod_id}            — force terminate pod (admin)
+GET  /admin/users                      — list users (admin)
+GET  /v1/user/volume-keys              — list user's volume keys
+POST /v1/user/volume-keys              — add/update a volume key
+DELETE /v1/user/volume-keys/{id}       — delete a volume key
 """
 
 from __future__ import annotations
@@ -75,10 +80,12 @@ from bridge.schemas import (
     Usage,
     UsagePeriod,
     UsageResponse,
+    UserTierOverrideRequest,
+    UserTierOverrideResponse,
 )
 from bridge.crypto import decrypt_provider_key, encrypt_provider_key
 from bridge.settings import settings
-from database.models import ApiKey, Pod, PodStatus, Request as DBRequest, RequestStatus, User, UserProviderKey, UserVolumeKey
+from database.models import ApiKey, Pod, PodStatus, Request as DBRequest, RequestStatus, User, UserProviderKey, UserTierOverride, UserVolumeKey
 from providers.base import VolumeValidationError
 from database.session import SessionLocal, get_session
 
@@ -266,6 +273,18 @@ async def chat_completions(
     if not getattr(user, "allow_local", True):
         _disabled = list({*_disabled, "local"})
     _provider_order = list(user.provider_order or [])
+    _tier_ov_result = await session.execute(
+        select(UserTierOverride).where(
+            UserTierOverride.user_id == user.id,
+            UserTierOverride.tier == decision.tier,
+        )
+    )
+    _tier_ov = _tier_ov_result.scalar_one_or_none()
+    if _tier_ov:
+        if _tier_ov.provider_order:
+            _provider_order = list(_tier_ov.provider_order)
+        if _tier_ov.disabled_providers:
+            _disabled = list({*_disabled, *_tier_ov.disabled_providers})
     try:
         _user_label = user.email.split("@")[0][:20] if user.email else None
         pod = await manager.acquire(
@@ -864,6 +883,38 @@ async def revoke_api_key(
     await session.commit()
 
 
+class ApiKeyListItem(BaseModel):
+    id: str
+    label: str | None
+    prefix: str
+    created_at: str
+    last_used_at: str | None
+    revoked: bool
+
+
+@app.get("/auth/keys", response_model=list[ApiKeyListItem])
+async def list_api_keys(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    result = await session.execute(
+        select(ApiKey)
+        .where(ApiKey.user_id == user.id)
+        .order_by(ApiKey.created_at.desc())
+    )
+    return [
+        ApiKeyListItem(
+            id=k.id,
+            label=k.label,
+            prefix=k.key_prefix,
+            created_at=k.created_at.isoformat(),
+            last_used_at=k.last_used_at.isoformat() if k.last_used_at else None,
+            revoked=k.revoked_at is not None,
+        )
+        for k in result.scalars().all()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # User Volume Key routes
 # ---------------------------------------------------------------------------
@@ -963,6 +1014,103 @@ async def delete_volume_key(
         raise HTTPException(status_code=404, detail="Volume key not found")
     await session.delete(row)
     await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# User Tier Override routes
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/user/tier-overrides", response_model=list[UserTierOverrideResponse])
+async def list_tier_overrides(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    result = await session.execute(
+        select(UserTierOverride)
+        .where(UserTierOverride.user_id == user.id)
+        .order_by(UserTierOverride.tier)
+    )
+    return [_uto_to_response(o) for o in result.scalars().all()]
+
+
+@app.get("/v1/user/tier-overrides/{tier}", response_model=UserTierOverrideResponse)
+async def get_tier_override(
+    tier: str,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    row = (await session.execute(
+        select(UserTierOverride).where(
+            UserTierOverride.user_id == user.id,
+            UserTierOverride.tier == tier,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No override for tier '{tier}'")
+    return _uto_to_response(row)
+
+
+@app.put("/v1/user/tier-overrides/{tier}", response_model=UserTierOverrideResponse)
+async def upsert_tier_override(
+    tier: str,
+    body: UserTierOverrideRequest,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    row = (await session.execute(
+        select(UserTierOverride).where(
+            UserTierOverride.user_id == user.id,
+            UserTierOverride.tier == tier,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        row = UserTierOverride(user_id=user.id, tier=tier)
+        session.add(row)
+    row.provider_order = body.provider_order
+    row.disabled_providers = body.disabled_providers
+    row.provider_models = body.provider_models
+    row.model_override = body.model_override
+    row.model_no_tools_override = body.model_no_tools_override
+    row.idle_timeout_sec = body.idle_timeout_sec
+    row.max_context_tokens = body.max_context_tokens
+    row.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(row)
+    return _uto_to_response(row)
+
+
+@app.delete("/v1/user/tier-overrides/{tier}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tier_override(
+    tier: str,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    row = (await session.execute(
+        select(UserTierOverride).where(
+            UserTierOverride.user_id == user.id,
+            UserTierOverride.tier == tier,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No override for tier '{tier}'")
+    await session.delete(row)
+    await session.commit()
+
+
+def _uto_to_response(row: UserTierOverride) -> UserTierOverrideResponse:
+    return UserTierOverrideResponse(
+        id=row.id,
+        tier=row.tier,
+        provider_order=row.provider_order,
+        disabled_providers=row.disabled_providers,
+        provider_models=row.provider_models,
+        model_override=row.model_override,
+        model_no_tools_override=row.model_no_tools_override,
+        idle_timeout_sec=row.idle_timeout_sec,
+        max_context_tokens=row.max_context_tokens,
+        created_at=row.created_at.isoformat(),
+        updated_at=row.updated_at.isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------

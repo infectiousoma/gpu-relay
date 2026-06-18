@@ -249,4 +249,32 @@ class ErrorResponse(BaseModel):
     error: ErrorDetail
 
 
+# ---------------------------------------------------------------------------
+# Tier overrides
+# ---------------------------------------------------------------------------
+
+class UserTierOverrideRequest(BaseModel):
+    provider_order: list[str] | None = None
+    disabled_providers: list[str] | None = None
+    provider_models: dict[str, str] | None = None
+    model_override: str | None = None
+    model_no_tools_override: str | None = None
+    idle_timeout_sec: int | None = None
+    max_context_tokens: int | None = None
+
+
+class UserTierOverrideResponse(BaseModel):
+    id: str
+    tier: str
+    provider_order: list[str] | None
+    disabled_providers: list[str] | None
+    provider_models: dict[str, str] | None
+    model_override: str | None
+    model_no_tools_override: str | None
+    idle_timeout_sec: int | None
+    max_context_tokens: int | None
+    created_at: str
+    updated_at: str
+
+
 ChatCompletionResponse.model_rebuild()
