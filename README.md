@@ -20,6 +20,7 @@ Multi-tenant, OpenAI-compatible LLM gateway. Route requests to cloud GPU pods (R
 - [Preprocessing Pipeline](docs/pipeline.md)
 - [Development & Architecture](docs/development.md)
 - [Deployment Modes](docs/deployment.md) — solo, hosted multi-user, gateway client, full self-hosted
+- [Workspace Tools](docs/workspace-tools-system-prompt.md) — Open WebUI file I/O + code execution tool; includes recommended system prompt
 - [Website & Wiki Deployment](docs/deployment.md) — GitHub Pages, Netlify, Vercel, GitHub Wiki
 
 ## Quickstart

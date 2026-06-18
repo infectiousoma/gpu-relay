@@ -480,6 +480,7 @@
       <li><a href="#providers">Providers</a></li>
       <li><a href="#cli">CLI</a></li>
       <li><a href="#deploy">Deploy</a></li>
+      <li><a href="#workspace">Workspace</a></li>
       <li><a href="#screenshots">Screenshots</a></li>
     </ul>
   </div>
@@ -1289,6 +1290,92 @@ PIPELINE_ID=gpu-relay                   <span class="p"># default; match your in
     <div class="warn-box">
       The user portal calls <code>GET /v1/usage</code> on the bridge. It only shows data for the
       authenticated key's user — no cross-user visibility.
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WORKSPACE TOOLS ═══ -->
+<section id="workspace">
+  <div class="container">
+    <h2>Workspace Tools</h2>
+    <p style="color:var(--text-dim);margin-bottom:24px;">
+      Open WebUI Tool integration that gives any model persistent file I/O and code execution
+      in a shared <code>workspace_data/</code> directory. Add the tool once in Admin Panel —
+      every model in Open WebUI gains the same capabilities.
+    </p>
+
+    <h3>Available Tools</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>write_file(path, content)</code></td><td>Write text to a file; creates parent dirs automatically</td></tr>
+          <tr><td><code>read_file(path)</code></td><td>Read a file from the workspace</td></tr>
+          <tr><td><code>run_bash(command)</code></td><td>Execute a shell command in the workspace directory</td></tr>
+          <tr><td><code>run_python(code)</code></td><td>Execute a Python code <em>snippet</em> (not a file path)</td></tr>
+          <tr><td><code>list_tree(path, depth)</code></td><td>Browse directory structure</td></tr>
+          <tr><td><code>search_files(query, path, glob)</code></td><td>Regex search across workspace files</td></tr>
+          <tr><td><code>delete_path(path)</code></td><td>Delete file or directory</td></tr>
+          <tr><td><code>move_path(src, dst)</code></td><td>Move or rename file/directory</td></tr>
+          <tr><td><code>create_directory(path)</code></td><td>Create directory (and parents)</td></tr>
+          <tr><td><code>generate_pdf(markdown, output_path)</code></td><td>Render Markdown → PDF in workspace</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Setup</h3>
+    <div class="code-wrap">
+      <pre><span class="p"># 1. Open WebUI → Admin Panel → Tools → Add Tool</span>
+<span class="p">#    Paste contents of: pipelines/openwebui_tool.py</span>
+<span class="p">#    Set valve: workspace_tools_url = http://workspace-tools:7000</span>
+
+<span class="p"># 2. Start workspace-tools service (already in docker-compose.yml)</span>
+<span class="p">$</span> docker compose up -d workspace-tools
+
+<span class="p"># 3. In any Open WebUI chat: enable the tool via the tool icon, then chat normally</span></pre>
+      <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+    </div>
+
+    <h3>System Prompt</h3>
+    <p style="color:var(--text-dim);margin-bottom:12px;">
+      Without a system prompt, models hallucinate tool calls as Python code instead of invoking
+      them. Use the recommended system prompt to enforce correct behavior.
+    </p>
+    <div class="code-wrap">
+      <pre>You have access to Workspace Tools. You MUST use them for ALL file and execution tasks —
+never simulate, imagine, or describe results.
+
+Rules:
+- Writing code: always call write_file with real file content (actual newlines, not \n)
+- Testing code: always call run_bash or run_python — never show "expected output"
+- Browsing files: always call list_tree or read_file
+- If a tool call fails: read the actual error, fix the actual file, retry
+- To run a Python FILE: use run_bash with "python3 &lt;path&gt;" — never pass a file path to run_python
+- run_python is for inline code snippets only, e.g. run_python("print('hello')")
+- File organization: always create new projects under projects/&lt;project-name&gt;/, not the workspace root
+
+CRITICAL — tool call rules:
+- Tool calls are NOT Python code. Never write run_bash(...) in a code block.
+- Invoke tools directly — do not write code that calls them.
+- "I will call run_bash" followed by a code block = violation. Call it, don't narrate it.
+- Fake output is output without a tool call. It is always wrong.</pre>
+      <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+    </div>
+    <p style="color:var(--text-dim);font-size:12px;margin-top:8px;">
+      Full prompt with explanations: <code>docs/workspace-tools-system-prompt.md</code>
+    </p>
+
+    <h3>Common Mistakes</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Wrong</th><th>Right</th></tr></thead>
+        <tbody>
+          <tr><td><code>run_python("projects/calc/main.py")</code></td><td><code>run_bash("python3 projects/calc/main.py")</code></td></tr>
+          <tr><td>Writing <code>result = run_bash(...)</code> in a code block</td><td>Invoking <code>run_bash</code> as a tool call directly</td></tr>
+          <tr><td>Creating files in workspace root</td><td>Creating under <code>projects/&lt;name&gt;/</code></td></tr>
+          <tr><td>Calling <code>list_tree</code> before <code>write_file</code></td><td>Write first, verify after</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </section>

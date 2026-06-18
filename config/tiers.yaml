@@ -96,12 +96,12 @@ tiers:
     provider_overrides:
       [
         runpod,
+        groq,
         cerebras,
         sambanova,
         local,
         vast,
         lambda,
-        groq,
         openai,
         together,
         mistral,

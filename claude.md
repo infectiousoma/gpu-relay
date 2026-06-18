@@ -201,7 +201,22 @@ JWT or `sk-llm-...` API key auth. Per-user quotas (RPM/TPD/USD), `allowed_tiers`
 - `docs/index.html` — single-page GitHub Pages site (Lain cyberpunk aesthetic, inline CSS/JS, no build step)
 - `docs/screenshots/` — PNG files auto-loaded by the gallery section
 - `docs/deployment.md` — how to enable GitHub Pages, GitHub Wiki sync, Netlify/Vercel/nginx alternatives
+- `docs/workspace-tools-system-prompt.md` — recommended system prompt for Workspace Tools + explanation of each rule
 - Enable Pages: repo Settings → Pages → branch `master` → folder `/docs`
+
+## Workspace Tools
+
+Open WebUI Tool (`pipelines/openwebui_tool.py`) + sidecar service (`workspace-tools`, `docker/Dockerfile.workspace-tools`). Gives models persistent file I/O and code execution in `workspace_data/`.
+
+**Tools:** `write_file`, `read_file`, `run_bash`, `run_python`, `list_tree`, `search_files`, `delete_path`, `move_path`, `create_directory`, `generate_pdf`.
+
+**Critical model behavior rules** (system prompt enforces these):
+- `run_python` takes a code *string*, not a file path — use `run_bash("python3 <path>")` to execute files
+- Tool calls must be invoked directly, not written as Python code in a code block
+- Files go under `projects/<name>/`, not workspace root
+- Never narrate "I will call run_bash" then fake output — call it or admit you can't
+
+**Common failure mode:** model writes `result = run_bash(...)` in a markdown code block instead of invoking the tool. Tool never executes. Fix: add CRITICAL tool call rules to system prompt (see `docs/workspace-tools-system-prompt.md`).
 
 ## Open WebUI Sync & Gateway
 
