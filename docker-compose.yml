@@ -4,6 +4,11 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-llm}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
@@ -20,6 +25,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     volumes:
       - redis_data:/data
@@ -33,6 +43,11 @@ services:
   ollama:
     image: ollama/ollama:latest
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -57,6 +72,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile.bridge
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file: .env
     environment:
       MOCK_PROVIDERS: ${MOCK_PROVIDERS:-}
@@ -78,6 +98,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile.dashboard
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file: .env
     depends_on:
       postgres:
@@ -93,6 +118,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile.ccr
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "5"
     volumes:
       - ./config/ccr-config.json:/root/.claude-code-router/config.json:ro
     environment:
@@ -107,6 +137,11 @@ services:
   pipelines:
     image: ghcr.io/open-webui/pipelines:main
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       PIPELINES_DIR: /app/pipelines
       PIPELINES_API_KEY: ${PIPELINES_API_KEY:-change-me-pipelines-secret}
@@ -121,6 +156,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile.workspace-tools
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       WORKSPACE_ROOT: /workspace
       MAX_EXEC_TIMEOUT: ${WORKSPACE_EXEC_TIMEOUT:-30}
@@ -134,6 +174,11 @@ services:
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       WEBUI_SECRET_KEY: ${OPENWEBUI_SECRET_KEY:-change-me}
       # Bridge as primary OpenAI-compatible backend (all GPU/API providers)
