@@ -36,3 +36,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Workspace (user-generated files via Open WebUI tools)
+workspace/
