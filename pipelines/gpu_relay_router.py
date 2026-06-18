@@ -15,7 +15,7 @@ Setup after installing this pipeline in Open WebUI:
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
+from typing import Generator
 
 import httpx
 from pydantic import BaseModel
@@ -47,51 +47,56 @@ class Pipeline:
             pass
         return [{"id": "llm-auto", "name": "llm-auto (bridge unavailable)"}]
 
-    async def pipe(self, body: dict, __user__: dict | None = None, **_) -> AsyncIterator[str] | str:
-        email = (__user__ or {}).get("email", "")
+    def _resolve_key(self, user: dict | None) -> str:
+        email = (user or {}).get("email", "")
         try:
             key_map = json.loads(self.valves.user_key_map)
         except Exception:
             key_map = {}
+        return key_map.get(email) or self.valves.fallback_key or self.valves.admin_key
 
-        api_key = key_map.get(email) or self.valves.fallback_key or self.valves.admin_key
-        if not api_key:
-            yield "Error: no bridge API key configured for this user."
-            return
-
-        # Strip pipeline prefix: "gpu-relay.llm-simple" → "llm-simple"
+    def _strip_model(self, body: dict) -> str:
         model = body.get("model", "")
-        if "." in model:
-            model = model.split(".", 1)[1]
+        return model.split(".", 1)[1] if "." in model else model
 
-        payload = {**body, "model": model}
+    def pipe(self, body: dict, __user__: dict | None = None, **_) -> str | dict | Generator:
+        api_key = self._resolve_key(__user__)
+        if not api_key:
+            return "Error: no bridge API key configured for this user."
+
+        model = self._strip_model(body)
+        # OpenAI spec: user is a string; Open WebUI injects a dict — strip it
+        payload = {k: v for k, v in body.items() if k != "user"}
+        payload["model"] = model
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=300) as client:
-            if body.get("stream", False):
-                async with client.stream(
-                    "POST",
-                    f"{self.valves.bridge_url}/v1/chat/completions",
-                    json=payload,
-                    headers=headers,
-                ) as resp:
-                    if not resp.is_success:
-                        err = await resp.aread()
-                        yield f"Bridge error {resp.status_code}: {err.decode()[:500]}"
-                        return
-                    async for line in resp.aiter_lines():
-                        if line.startswith("data: "):
-                            yield line + "\n\n"
-            else:
-                resp = await client.post(
-                    f"{self.valves.bridge_url}/v1/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
+        if body.get("stream", False):
+            return self._stream(payload, headers)
+
+        with httpx.Client(timeout=300) as client:
+            resp = client.post(
+                f"{self.valves.bridge_url}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            if not resp.is_success:
+                return f"Bridge error {resp.status_code}: {resp.text[:500]}"
+            return resp.json()
+
+    def _stream(self, payload: dict, headers: dict) -> Generator[str, None, None]:
+        with httpx.Client(timeout=300) as client:
+            with client.stream(
+                "POST",
+                f"{self.valves.bridge_url}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+            ) as resp:
                 if not resp.is_success:
-                    yield f"Bridge error {resp.status_code}: {resp.text[:500]}"
+                    yield f"Bridge error {resp.status_code}: {resp.read().decode()[:500]}"
                     return
-                yield resp.text
+                for line in resp.iter_lines():
+                    if line.startswith("data: "):
+                        yield line + "\n\n"

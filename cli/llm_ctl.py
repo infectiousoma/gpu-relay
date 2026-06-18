@@ -107,6 +107,7 @@ async def users_add(
     billing_mode: str = typer.Option("postpaid", help="prepaid | postpaid"),
     budget_usd: float = typer.Option(25.0, "--budget", help="monthly budget USD"),
     idempotent: bool = typer.Option(False, help="skip if user already exists"),
+    sync_openwebui: bool = typer.Option(False, "--sync-openwebui", help="create matching user in Open WebUI"),
 ):
     """Create a new user and print their user ID."""
     if password is None:
@@ -141,6 +142,14 @@ async def users_add(
         await session.commit()
 
     console.print(f"[green]Created user[/green] {email} (id={user.id})")
+
+    if sync_openwebui:
+        from bridge.openwebui_sync import create_openwebui_user
+        ow_id = await create_openwebui_user(email, password)
+        if ow_id:
+            console.print(f"[green]Open WebUI user created[/green] (ow_id={ow_id})")
+        else:
+            console.print("[yellow]Open WebUI sync skipped or user already exists[/yellow]")
 
 
 @users_app.command("set-password")
@@ -366,6 +375,7 @@ async def users_local_access(
 async def users_keys_add(
     email: str,
     label: Optional[str] = typer.Option(None, "--label"),
+    sync_pipeline: bool = typer.Option(False, "--sync-pipeline", help="update gpu-relay pipeline user_key_map"),
 ):
     """Create an API key for a user. Plaintext shown ONCE."""
     async with SessionLocal() as session:
@@ -382,6 +392,14 @@ async def users_keys_add(
 
     console.print(f"[green]API key created[/green] (id={row.id})")
     console.print(f"[bold yellow]Key (copy now — shown once):[/bold yellow] {plaintext}")
+
+    if sync_pipeline:
+        from bridge.openwebui_sync import update_pipeline_user_key_map
+        ok = await update_pipeline_user_key_map(email, plaintext)
+        if ok:
+            console.print(f"[green]Pipeline user_key_map updated[/green] for {email}")
+        else:
+            console.print("[yellow]Pipeline sync skipped (check PIPELINES_API_KEY setting)[/yellow]")
 
 
 @users_app.command("keys-list")

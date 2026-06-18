@@ -36,7 +36,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import case, cast, func, select, Date as SADate
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridge import __version__
@@ -60,6 +60,8 @@ from bridge.schemas import (
     ChatCompletionResponse,
     ChatMessage,
     ChatCompletionChoice,
+    CreateUserRequest,
+    CreateUserResponse,
     EmbeddingData,
     EmbeddingRequest,
     EmbeddingResponse,
@@ -71,6 +73,8 @@ from bridge.schemas import (
     ModelsResponse,
     TokenResponse,
     Usage,
+    UsagePeriod,
+    UsageResponse,
 )
 from bridge.crypto import decrypt_provider_key, encrypt_provider_key
 from bridge.settings import settings
@@ -392,7 +396,7 @@ async def chat_completions(
                 if not r.is_success:
                     err_text = r.text[:2000]
                     log.error("inference_http_error", status=r.status_code, provider=pod.provider, body=err_text)
-                    _is_model_not_found = r.status_code == 404 and "not found" in err_text.lower()
+                    _is_model_not_found = r.status_code == 404 and ("not found" in err_text.lower() or not err_text)
                     if _is_model_not_found and _effective_model != pod.model and pod.model:
                         log.warning("alt_model_not_found_fallback", alt=_effective_model, primary=pod.model)
                         _effective_model = pod.model
@@ -539,7 +543,7 @@ async def _stream_response(
                         err_text = err_body.decode(errors="replace")[:2000]
                         log.error("inference_http_error", status=resp.status_code, provider=pod.provider, body=err_text)
                         # Model-not-found: alt model not yet pulled — fall back to pod's primary model.
-                        if resp.status_code == 404 and "not found" in err_text and _active_payload.get("model") != pod.model:
+                        if resp.status_code == 404 and ("not found" in err_text or not err_text) and _active_payload.get("model") != pod.model:
                             log.warning("alt_model_not_found_fallback", requested=_active_payload.get("model"), fallback=pod.model)
                             _active_payload = {**_active_payload, "model": pod.model}
                             async with client.stream("POST", f"{pod.endpoint_url}/v1/chat/completions", json=_active_payload, headers=pod.extra_headers) as resp2:
@@ -1038,6 +1042,171 @@ async def admin_list_users(
         }
         for u in users
     ]
+
+
+@app.post("/admin/users", response_model=CreateUserResponse, status_code=201)
+async def admin_create_user(
+    body: CreateUserRequest,
+    _admin: AdminUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Create a bridge user and optionally sync to Open WebUI + pipeline valve."""
+    from database.models import BillingMode as DBBillingMode, Quota, TierName, UserRole
+    from decimal import Decimal
+
+    existing = (await session.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"User {body.email!r} already exists")
+
+    try:
+        role = UserRole(body.role)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {body.role!r}")
+    try:
+        billing = DBBillingMode(body.billing_mode)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid billing_mode: {body.billing_mode!r}")
+
+    user = User(
+        email=body.email,
+        password_hash=hash_password(body.password),
+        role=role,
+        billing_mode=billing,
+        monthly_budget_usd=Decimal(str(body.budget_usd)),
+    )
+    session.add(user)
+    await session.flush()
+
+    session.add(Quota(
+        user_id=user.id,
+        requests_per_minute=60,
+        tokens_per_day=1_000_000,
+        usd_per_month=Decimal(str(body.budget_usd)),
+        max_tier=TierName.ultra,
+    ))
+
+    plaintext_key: str | None = None
+    key_prefix: str | None = None
+    if body.create_api_key:
+        plaintext_key, key_hash, prefix = generate_api_key()
+        key_prefix = prefix
+        session.add(ApiKey(user_id=user.id, key_hash=key_hash, key_prefix=prefix, label="default"))
+
+    await session.commit()
+
+    ow_synced = False
+    pipeline_synced = False
+    if body.sync_openwebui:
+        from bridge.openwebui_sync import create_openwebui_user, update_pipeline_user_key_map
+        ow_id = await create_openwebui_user(body.email, body.password)
+        ow_synced = bool(ow_id)
+        if plaintext_key:
+            pipeline_synced = await update_pipeline_user_key_map(body.email, plaintext_key)
+
+    log.info("admin_user_created", email=body.email, user_id=user.id, ow_synced=ow_synced)
+    return CreateUserResponse(
+        user_id=user.id,
+        email=user.email,
+        api_key=plaintext_key,
+        key_prefix=key_prefix,
+        openwebui_synced=ow_synced,
+        pipeline_synced=pipeline_synced,
+    )
+
+
+@app.post("/admin/sync-openwebui", status_code=200)
+async def admin_sync_openwebui(
+    _admin: AdminUser,
+    email: str,
+    api_key: str | None = None,
+):
+    """Update the pipeline user_key_map valve to add/update email→api_key mapping."""
+    from bridge.openwebui_sync import update_pipeline_user_key_map
+
+    pipeline_synced = False
+    if api_key:
+        pipeline_synced = await update_pipeline_user_key_map(email, api_key)
+
+    return {"email": email, "pipeline_synced": pipeline_synced}
+
+
+# ---------------------------------------------------------------------------
+# User usage stats
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/usage", response_model=UsageResponse)
+async def get_usage(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Return the authenticated user's usage statistics for this month and last 30 days."""
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # This month aggregate
+    month_result = await session.execute(
+        select(
+            func.count(DBRequest.id),
+            func.coalesce(func.sum(case((DBRequest.status == RequestStatus.ok, 1), else_=0)), 0),
+            func.coalesce(func.sum(DBRequest.prompt_tokens), 0),
+            func.coalesce(func.sum(DBRequest.completion_tokens), 0),
+            func.coalesce(func.sum(DBRequest.cost_usd), 0),
+        ).where(
+            DBRequest.user_id == user.id,
+            DBRequest.created_at >= month_start,
+        )
+    )
+    m = month_result.one()
+
+    this_month = UsagePeriod(
+        period=month_start.strftime("%Y-%m"),
+        total_requests=m[0] or 0,
+        ok_requests=m[1] or 0,
+        prompt_tokens=m[2] or 0,
+        completion_tokens=m[3] or 0,
+        cost_usd=float(m[4] or 0),
+    )
+
+    # Last 30 days, grouped by date
+    from datetime import timedelta
+    thirty_days_ago = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    thirty_days_ago = thirty_days_ago - timedelta(days=29)
+
+    day_col = cast(DBRequest.created_at, SADate).label("day")
+    daily_result = await session.execute(
+        select(
+            day_col,
+            func.count(DBRequest.id),
+            func.coalesce(func.sum(DBRequest.prompt_tokens), 0),
+            func.coalesce(func.sum(DBRequest.completion_tokens), 0),
+            func.coalesce(func.sum(DBRequest.cost_usd), 0),
+        ).where(
+            DBRequest.user_id == user.id,
+            DBRequest.created_at >= thirty_days_ago,
+        ).group_by(day_col).order_by(day_col)
+    )
+
+    daily: list[UsagePeriod] = [
+        UsagePeriod(
+            period=str(row[0]),
+            total_requests=row[1] or 0,
+            ok_requests=row[1] or 0,
+            prompt_tokens=row[2] or 0,
+            completion_tokens=row[3] or 0,
+            cost_usd=float(row[4] or 0),
+        )
+        for row in daily_result
+    ]
+
+    return UsageResponse(
+        user_id=user.id,
+        email=user.email,
+        monthly_budget_usd=float(user.monthly_budget_usd),
+        prepaid_balance_usd=float(user.prepaid_balance_usd),
+        billing_mode=user.billing_mode.value if hasattr(user.billing_mode, "value") else str(user.billing_mode),
+        this_month=this_month,
+        last_30_days=daily,
+    )
 
 
 # ---------------------------------------------------------------------------

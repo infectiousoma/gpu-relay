@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     # Whether local Ollama may be used for preprocessing (works even at level 0 with small model)
     local_preprocess_enabled: bool = True
 
+    # --- Gateway service ---
+    gateway_bridge_url: str = "http://bridge:8000"
+
     # --- User provider key encryption ---
     provider_key_secret: str = "change-me-provider-key-secret"  # set PROVIDER_KEY_SECRET in .env
 
@@ -89,6 +92,16 @@ class Settings(BaseSettings):
 
     # --- Open WebUI bridge link ---
     openwebui_bridge_url: str = "http://bridge:8000"
+
+    # --- Open WebUI sync (auto-create OW users when bridge users are created) ---
+    openwebui_url: str = "http://openwebui:8080"
+    openwebui_admin_email: str = ""
+    openwebui_admin_password: str = ""
+
+    # --- Pipelines sync (update user_key_map when keys are created) ---
+    pipelines_url: str = "http://pipelines:9099"
+    pipelines_api_key: str = ""
+    pipeline_id: str = "gpu-relay"
 
     @field_validator("mock_providers", mode="before")
     @classmethod

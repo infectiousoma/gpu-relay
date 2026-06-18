@@ -202,3 +202,35 @@ JWT or `sk-llm-...` API key auth. Per-user quotas (RPM/TPD/USD), `allowed_tiers`
 - `docs/screenshots/` — PNG files auto-loaded by the gallery section
 - `docs/deployment.md` — how to enable GitHub Pages, GitHub Wiki sync, Netlify/Vercel/nginx alternatives
 - Enable Pages: repo Settings → Pages → branch `master` → folder `/docs`
+
+## Open WebUI Sync & Gateway
+
+### User sync
+- `bridge/openwebui_sync.py` — `create_openwebui_user(email, password)` and `update_pipeline_user_key_map(email, api_key)`. Both read URL/creds from `settings` directly (no positional args for config).
+- `POST /admin/users` — creates bridge user + optional OW sync + API key in one HTTP call. Body: `CreateUserRequest` (email, password, name?, role, billing_mode, budget_usd, sync_openwebui, create_api_key, sync_pipeline). Returns `CreateUserResponse` with plaintext `api_key` (shown once).
+- `POST /admin/sync-openwebui?email=X&api_key=Y` — upserts one email→key entry in pipeline valve.
+- `GET /v1/usage` — user endpoint (no admin needed). Returns: `this_month` (request_count, success_count, prompt_tokens, completion_tokens, cost_usd), `last_30_days` (daily rows), `monthly_budget_usd`, `prepaid_balance_usd`, `billing_mode`, `email`, `user_id`.
+- CLI: `llmctl users add --sync-openwebui`, `llmctl users keys-add --sync-pipeline`.
+
+### Pipeline valve API paths (Pipelines service)
+- `GET  /v1/pipelines/{pipeline_id}/valves` — fetch current valve values (Bearer `PIPELINES_API_KEY`)
+- `POST /v1/pipelines/{pipeline_id}/valves/update` — update valve values; `user_key_map` is a JSON string embedded in the valve JSON object
+
+### New settings (bridge/settings.py)
+```
+openwebui_url: str = "http://openwebui:8080"        # bridge→OW internal URL
+openwebui_admin_email: str = ""
+openwebui_admin_password: str = ""
+pipelines_url: str = "http://pipelines:9099"
+pipelines_api_key: str = ""
+pipeline_id: str = "gpu-relay"
+```
+
+### Gateway
+- `gateway/main.py` — transparent reverse proxy. All HTTP methods/paths forwarded to `GATEWAY_BRIDGE_URL`. `Authorization` header passed through unchanged (user supplies their own `sk-llm-` key). Hop-by-hop headers stripped. Streaming detected via `Accept: text/event-stream` or `"stream":true` in body; uses `_client.send(..., stream=True)` + `aiter_bytes()`.
+- `docker-compose.gateway.yml` — compose overlay; use alongside main stack: `docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d gateway`
+- `docker/docker-compose.gateway.yml` — standalone file; gateway-only deploy pointing at remote bridge
+- `docker/Dockerfile.gateway` — Python 3.12-slim + `gateway/requirements.txt`
+
+### User portal
+- `dashboard/pages/user_portal.py` — Streamlit page in existing dashboard container (port 8501). Login: paste `sk-llm-` key (no email/password). Calls `GET /v1/usage`. No direct DB access — works against any bridge URL via `OPENWEBUI_BRIDGE_URL` env var.
