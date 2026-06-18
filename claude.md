@@ -5,12 +5,15 @@ Multi-tenant OpenAI-compatible bridge that routes requests to GPU providers runn
 ## Architecture
 
 ```
-Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Provider → Ollama/API
-                                       ↓
-                              Local Ollama (preprocessor + embeddings)
-                                       ↓
-                              Postgres (state/billing) + Redis (quota/cache)
+Claude Code → ccr (port 3456) → Bridge (FastAPI :8000) → Router → InstanceManager → Provider → Ollama/API
+Other clients ──────────────────────────────────────────────↑
+                                                          ↓
+                                               Local Ollama (preprocessor + embeddings)
+                                                          ↓
+                                               Postgres (state/billing) + Redis (quota/cache)
 ```
+
+**CCR (claude-code-router):** optional Docker service (`docker/Dockerfile.ccr`) that sits between Claude Code and the bridge. Converts Anthropic API format ↔ OpenAI format. Activate with `source scripts/ccr-activate.sh`, then run `claude`. Config template: `config/ccr-config.json.example`. See `docs/ccr.md`.
 
 **Key files:**
 - `bridge/main.py` — routes, `/v1/chat/completions`, `/v1/embeddings`, auth, admin; `_resolve_image_urls()` fetches external image URLs → base64 data URIs before forwarding to Ollama
@@ -29,13 +32,18 @@ Client (OpenAI API) → Bridge (FastAPI) → Router → InstanceManager → Prov
 
 ## Tiers
 
-| Tier | Model | GPU | $/hr |
-|------|-------|-----|------|
-| simple | qwen2.5-coder:7b-instruct-q4_K_M | RTX 4090 | ~0.69 |
-| architecture | qwen2.5-coder:32b-instruct-q4_K_M | RTX 4090 | ~0.69 |
-| maximum | deepseek-v3:latest-q4_K_M | L40S | ~1.14 |
-| ultra | qwen2.5:72b-instruct-q4_K_M | A100 80GB | ~1.89 |
-| vision | Llama-3.2-11B-Vision (Together dedicated) / MiniCPM-V (RunPod) | L40/RTX 4090 | ~0.69–1.49 |
+| Tier | Model (tools) | Model (no tools) | GPU | $/hr |
+|------|---------------|------------------|-----|------|
+| simple | qwen2.5-coder:7b-instruct-q4_K_M | — | RTX 4090 | ~0.69 |
+| mid | gemma4-coder:12b-q4_K_M | — | RTX 4090 | ~0.69 |
+| architecture | qwen2.5:32b-instruct-q4_K_M | qwen2.5-coder:32b-instruct-q4_K_M | RTX 4090 | ~0.69 |
+| maximum | deepseek-v3:latest-q4_K_M | — | L40S | ~1.14 |
+| ultra | qwen2.5:72b-instruct-q4_K_M | — | A100 80GB | ~1.89 |
+| vision | Llama-3.2-11B-Vision (Together dedicated) / MiniCPM-V (RunPod) | — | L40/RTX 4090 | ~0.69–1.49 |
+
+`model` is used when request has tools (e.g. Claude Code tool-call sessions). `model_no_tools` (set in `config/tiers.yaml`) is used for plain chat with no tool definitions — routes to coder variant which is faster for pure text generation. Falls back to primary model if `model_no_tools` is not pulled on the pod.
+
+`TIER_ORDER` in `bridge/router.py` must list tiers in ascending capability order. `mid` sits between `simple` and `architecture`.
 
 Pod provider prices synced from live RunPod GPU catalog at startup.
 
@@ -109,9 +117,11 @@ Three helpers in `bridge/router.py`: `has_image_content()`, `model_supports_visi
 
 1. `provider.launch(tier)` → `PodInfo` with endpoint_url
 2. `_wait_for_ready()` — polls `GET /api/tags` until 200, timeout=`COLD_START_TIMEOUT_SEC` (default 600s)
-3. `_pull_model()` — `POST /api/pull` with `stream:false`, read timeout 600s
-4. Pod marked ready in DB
-5. Reaper terminates after `idle_timeout_sec` of inactivity (SELECT FOR UPDATE SKIP LOCKED prevents double-terminate across workers)
+3. `_pull_model()` — `POST /api/pull` with `stream:true`, consumes progress lines to keep RunPod proxy alive (prevents 502 timeout on 19GB+ models)
+4. `_warmup_model()` — sends minimal inference (`max_tokens=1`) to load model into VRAM; prevents 524 Cloudflare timeout on first real request
+5. Alt model pull (`model_no_tools` from tiers.yaml) — non-fatal; `alt_model_pull_skipped` logged on failure
+6. Pod marked ready in DB
+7. Reaper terminates after `idle_timeout_sec` of inactivity (SELECT FOR UPDATE SKIP LOCKED prevents double-terminate across workers)
 
 ## Pipeline
 
@@ -129,13 +139,17 @@ Preprocessing rewrites user prompt via local Ollama 7B → structured JSON befor
 
 0. Image content detected + model doesn't support vision → `vision` tier
 0a. `llm-local` model → `simple` tier with `provider_override="local"` (bypasses cloud, zero cost)
-1. `X-Tier` header / `?tier=` param
+1. `X-Tier` header / `?tier=` param (ccr passes tier as model name, e.g. `model: "architecture"`)
 2. Per-user `allowed_tiers` whitelist
 3. Budget gate (downgrade or 402)
 4. Token count thresholds
 5. File count thresholds
 6. Complexity keywords
 7. Default: simple
+
+**Tool definition stripping** (`_slim_tools` in `main.py`): `slim_tools=True` is applied to ALL providers (Ollama included). Strips `description` fields from tool definitions and parameter schemas. Cuts Claude Code's tool payload from ~64K tokens to ~5K. Critical for API provider TPM limits; also prevents Cloudflare 524 on RunPod/Ollama — full tool schemas caused 126s+ generation time for qwen2.5:32b, exceeding Cloudflare's ~100s proxy timeout.
+
+**Tool call argument escaping** (`_fix_tool_arg_escaping` in `main.py`): Ollama models emit literal `\\n` (double-escaped) in JSON tool call arguments. Applied to all Ollama SSE streaming chunks and non-streaming responses — replaces `\\n` → `\n` in `function.arguments` strings.
 
 ## Key Env Vars
 

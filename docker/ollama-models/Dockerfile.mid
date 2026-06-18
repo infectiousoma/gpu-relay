@@ -1,0 +1,16 @@
+FROM ollama/ollama:latest
+
+# Pre-pull the mid-tier model (Gemma 4 12B coder, Q4_K_M, 7.38 GB).
+# Requires ~8 GB VRAM — RTX 4090 class GPU.
+RUN apt-get update -qq && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://huggingface.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF/resolve/main/gemma4-coding-Q4_K_M.gguf \
+        -O /tmp/model.gguf && \
+    printf 'FROM /tmp/model.gguf\n' > /tmp/Modelfile && \
+    ollama serve & sleep 5 && \
+    ollama create gemma4-coder:12b-q4_K_M -f /tmp/Modelfile && \
+    pkill ollama || true && \
+    rm /tmp/model.gguf /tmp/Modelfile
+
+EXPOSE 11434
+CMD ["ollama", "serve"]

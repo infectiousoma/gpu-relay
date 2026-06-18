@@ -40,7 +40,7 @@ def render() -> None:
         selected_user_label = st.selectbox("User", list(user_options.keys()))
         selected_user_id = user_options[selected_user_label]
 
-        tier_options = ["All tiers", "simple", "architecture", "maximum", "ultra", "vision"]
+        tier_options = ["All tiers", "simple", "mid", "architecture", "maximum", "ultra", "vision"]
         selected_tier_label = st.selectbox("Tier", tier_options)
         selected_tier = None if selected_tier_label == "All tiers" else selected_tier_label
 

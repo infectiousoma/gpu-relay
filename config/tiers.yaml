@@ -30,7 +30,8 @@ tiers:
   simple:
     gpu: RTX_4090
     model: qwen2.5-coder:7b-instruct-q4_K_M
-    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
+    provider_overrides:
+      [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
     vram_gb: 4
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 300
@@ -43,17 +44,69 @@ tiers:
       max_prompt_tokens: 8000
       max_files: 3
     provider_models:
-      local:    qwen2.5-coder:7b-instruct-q4_K_M
-      openai:   gpt-4o-mini
-      groq:     llama-3.1-8b-instant
+      local: qwen2.5-coder:7b-instruct-q4_K_M
+      openai: gpt-4o-mini
+      groq: llama-3.1-8b-instant
       together: meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo
-      mistral:  mistral-small-latest
+      mistral: mistral-small-latest
+      deepseek: deepseek-chat
+
+  mid:
+    gpu: RTX_4090
+    model: gemma4-coder:12b-q4_K_M
+    provider_overrides:
+      [
+        local,
+        cerebras,
+        sambanova,
+        runpod,
+        vast,
+        lambda,
+        groq,
+        openai,
+        together,
+        mistral,
+        deepseek,
+      ]
+    vram_gb: 8
+    cost_per_hour_usd: 0.69
+    idle_timeout_sec: 300
+    max_context_tokens: 32768
+    use_cases:
+      - moderate complexity tasks
+      - multi-function debugging
+      - code generation with context
+    routing_signals:
+      max_prompt_tokens: 16000
+      max_files: 10
+    provider_models:
+      local: gemma4-coder:12b-q4_K_M
+      openai: gpt-4o-mini
+      groq: llama-3.3-70b-versatile
+      cerebras: gpt-oss-120b
+      sambanova: Meta-Llama-3.3-70B-Instruct
+      together: meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
+      mistral: mistral-medium-latest
       deepseek: deepseek-chat
 
   architecture:
     gpu: RTX_4090
-    model: qwen2.5-coder:32b-instruct-q4_K_M
-    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
+    model: qwen2.5:32b-instruct-q4_K_M
+    model_no_tools: qwen2.5-coder:32b-instruct-q4_K_M
+    provider_overrides:
+      [
+        runpod,
+        cerebras,
+        sambanova,
+        local,
+        vast,
+        lambda,
+        groq,
+        openai,
+        together,
+        mistral,
+        deepseek,
+      ]
     vram_gb: 18
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 600
@@ -71,17 +124,20 @@ tiers:
         - refactor
         - review
     provider_models:
-      local:    qwen2.5-coder:32b-instruct-q4_K_M
-      openai:   gpt-4o
-      groq:     llama-3.3-70b-versatile
+      local: qwen2.5-coder:32b-instruct-q4_K_M
+      openai: gpt-4o
+      groq: llama-3.3-70b-versatile
+      cerebras: gpt-oss-120b
+      sambanova: Meta-Llama-3.3-70B-Instruct
       together: meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
-      mistral:  mistral-medium-latest
+      mistral: mistral-medium-latest
       deepseek: deepseek-chat
 
   maximum:
     gpu: L40S
     model: deepseek-v3:latest-q4_K_M
-    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
+    provider_overrides:
+      [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
     vram_gb: 36
     cost_per_hour_usd: 1.14
     idle_timeout_sec: 600
@@ -99,17 +155,18 @@ tiers:
         - security
         - system design
     provider_models:
-      local:    deepseek-v3:latest-q4_K_M
-      openai:   gpt-4o
-      groq:     llama-3.3-70b-versatile
+      local: deepseek-v3:latest-q4_K_M
+      openai: gpt-4o
+      groq: llama-3.3-70b-versatile
       together: meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo
-      mistral:  mistral-large-latest
+      mistral: mistral-large-latest
       deepseek: deepseek-reasoner
 
   ultra:
     gpu: A100_80GB
     model: qwen2.5:72b-instruct-q4_K_M
-    provider_overrides: [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
+    provider_overrides:
+      [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
     vram_gb: 48
     cost_per_hour_usd: 1.89
     idle_timeout_sec: 600
@@ -124,33 +181,46 @@ tiers:
         - mission-critical
         - full audit
     provider_models:
-      local:    qwen2.5:72b-instruct-q4_K_M
-      openai:   gpt-4o
-      groq:     llama-3.3-70b-versatile
+      local: qwen2.5:72b-instruct-q4_K_M
+      openai: gpt-4o
+      groq: llama-3.3-70b-versatile
       together: meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo
-      mistral:  mistral-large-latest
+      mistral: mistral-large-latest
       deepseek: deepseek-reasoner
 
 # Per-token costs for API providers (USD per 1K tokens, as of 2026-05).
 # Update these when providers change their pricing.
 api_token_costs:
   openai:
-    gpt-4o-mini:  {input_per_1k: 0.000150, output_per_1k: 0.000600}
-    gpt-4o:       {input_per_1k: 0.002500, output_per_1k: 0.010000}
+    gpt-4o-mini: { input_per_1k: 0.000150, output_per_1k: 0.000600 }
+    gpt-4o: { input_per_1k: 0.002500, output_per_1k: 0.010000 }
   groq:
-    llama-3.1-8b-instant:    {input_per_1k: 0.000050, output_per_1k: 0.000080}
-    llama-3.3-70b-versatile: {input_per_1k: 0.000590, output_per_1k: 0.000790}
+    llama-3.1-8b-instant: { input_per_1k: 0.000050, output_per_1k: 0.000080 }
+    llama-3.3-70b-versatile: { input_per_1k: 0.000590, output_per_1k: 0.000790 }
   together:
-    meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo: {input_per_1k: 0.000180, output_per_1k: 0.000180}
-    meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo:   {input_per_1k: 0.000880, output_per_1k: 0.000880}
-    meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo:  {input_per_1k: 0.003500, output_per_1k: 0.003500}
+    meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo:
+      { input_per_1k: 0.000180, output_per_1k: 0.000180 }
+    meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo:
+      { input_per_1k: 0.000880, output_per_1k: 0.000880 }
+    meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo:
+      { input_per_1k: 0.003500, output_per_1k: 0.003500 }
   mistral:
-    mistral-small-latest:  {input_per_1k: 0.000100, output_per_1k: 0.000300}
-    mistral-medium-latest: {input_per_1k: 0.000400, output_per_1k: 0.002000}
-    mistral-large-latest:  {input_per_1k: 0.002000, output_per_1k: 0.006000}
+    mistral-small-latest: { input_per_1k: 0.000100, output_per_1k: 0.000300 }
+    mistral-medium-latest: { input_per_1k: 0.000400, output_per_1k: 0.002000 }
+    mistral-large-latest: { input_per_1k: 0.002000, output_per_1k: 0.006000 }
   deepseek:
-    deepseek-chat:     {input_per_1k: 0.000270, output_per_1k: 0.001100}
-    deepseek-reasoner: {input_per_1k: 0.000550, output_per_1k: 0.002190}
+    deepseek-chat: { input_per_1k: 0.000270, output_per_1k: 0.001100 }
+    deepseek-reasoner: { input_per_1k: 0.000550, output_per_1k: 0.002190 }
+  cerebras:
+    zai-glm-4.7: { input_per_1k: 0.000100, output_per_1k: 0.000100 }
+    gpt-oss-120b: { input_per_1k: 0.000600, output_per_1k: 0.000600 }
+  sambanova:
+    Meta-Llama-3.1-8B-Instruct:
+      { input_per_1k: 0.000100, output_per_1k: 0.000200 }
+    Meta-Llama-3.3-70B-Instruct:
+      { input_per_1k: 0.000600, output_per_1k: 0.001200 }
+    Meta-Llama-3.1-405B-Instruct:
+      { input_per_1k: 0.005000, output_per_1k: 0.010000 }
 
 # Provider priority. Bridge tries left-to-right; falls back on capacity/error.
 providers:

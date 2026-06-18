@@ -17,8 +17,8 @@ from dashboard.db import (
 )
 from database.models import User
 
-_ALL_PROVIDERS = ["openai", "groq", "together", "together_dedicated", "mistral", "deepseek", "runpod", "vast", "lambda", "local"]
-_API_PROVIDERS = ["openai", "groq", "together", "mistral", "deepseek"]
+_ALL_PROVIDERS = ["openai", "groq", "cerebras", "sambanova", "together", "together_dedicated", "mistral", "deepseek", "runpod", "vast", "lambda", "local"]
+_API_PROVIDERS = ["openai", "groq", "cerebras", "sambanova", "together", "mistral", "deepseek"]
 _GPU_PROVIDERS = ["runpod", "vast", "lambda"]
 
 
@@ -47,7 +47,7 @@ def render() -> None:
         from bridge.router import get_tiers
         all_tiers = list(get_tiers().keys())
     except Exception:
-        all_tiers = ["simple", "architecture", "maximum", "ultra", "vision"]
+        all_tiers = ["simple", "mid", "architecture", "maximum", "ultra", "vision"]
 
     available_tiers = [t for t in all_tiers if not admin_ceiling or t in admin_ceiling]
 

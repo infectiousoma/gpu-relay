@@ -14,6 +14,7 @@ Multi-tenant, OpenAI-compatible LLM gateway. Route requests to cloud GPU pods (R
 - [Endpoints](#endpoints)
 - [Tiers & Models](docs/tiers.md)
 - [Providers](docs/providers.md) — RunPod, local GPU, OpenAI, Groq, DeepSeek, etc.
+- [Claude Code Router](docs/ccr.md) — use Claude Code with this bridge via ccr
 - [CLI Reference](docs/cli.md) — user management, API keys, billing, observability
 - [Embeddings](docs/embeddings.md)
 - [Preprocessing Pipeline](docs/pipeline.md)
@@ -44,6 +45,7 @@ curl -H "Authorization: Bearer $API_KEY" \
 | Bridge API | 8000 | http://localhost:8000 |
 | Dashboard | 8501 | http://localhost:8501 |
 | Open WebUI | 3000 | http://localhost:3000 |
+| CCR (claude-code-router) | 3456 | http://localhost:3456 |
 | Postgres | 5432 | (internal) |
 | Redis | 6379 | (internal) |
 | Ollama | 11434 | (internal) |
@@ -66,7 +68,7 @@ curl ... -d '{"model":"llm-auto","messages":[...]}'
 curl -H "X-Tier: simple" ...
 ```
 
-Available models: `llm-simple`, `llm-architecture`, `llm-maximum`, `llm-ultra`, `llm-vision`, `llm-auto`
+Available models: `llm-simple`, `llm-mid`, `llm-architecture`, `llm-maximum`, `llm-ultra`, `llm-vision`, `llm-auto`
 
 See [Tiers & Models](docs/tiers.md) for full details and tier locking options.
 

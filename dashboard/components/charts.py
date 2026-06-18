@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 
 TIER_COLORS = {
     "simple":       "#4ade80",   # green
+    "mid":          "#34d399",   # emerald
     "architecture": "#60a5fa",   # blue
     "maximum":      "#f59e0b",   # amber
     "ultra":        "#f43f5e",   # rose
@@ -43,7 +44,7 @@ def cost_trend_chart(daily: list[dict]) -> go.Figure:
     df["date"] = pd.to_datetime(df["date"])
 
     fig = go.Figure()
-    for tier in ["simple", "architecture", "maximum", "ultra"]:
+    for tier in ["simple", "mid", "architecture", "maximum", "ultra"]:
         tier_df = df[df["tier"] == tier].sort_values("date")
         if tier_df.empty:
             continue
@@ -102,7 +103,7 @@ def usage_hours_bar(daily: list[dict]) -> go.Figure:
     df["date"] = pd.to_datetime(df["date"])
 
     fig = go.Figure()
-    for tier in ["simple", "architecture", "maximum", "ultra"]:
+    for tier in ["simple", "mid", "architecture", "maximum", "ultra"]:
         tier_df = df[df["tier"] == tier].sort_values("date")
         if tier_df.empty:
             continue
@@ -160,7 +161,7 @@ def latency_histogram(requests: list[dict]) -> go.Figure:
     df["latency_s"] = df["latency_ms"] / 1000
 
     fig = go.Figure()
-    for tier in ["simple", "architecture", "maximum", "ultra"]:
+    for tier in ["simple", "mid", "architecture", "maximum", "ultra"]:
         t = df[df["tier"] == tier]
         if t.empty:
             continue

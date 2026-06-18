@@ -7,6 +7,7 @@
 | Tier | Model | GPU | $/hr (est.) |
 |------|-------|-----|-------------|
 | `simple` | Qwen2.5-Coder 7B | RTX 4090 | ~$0.69 |
+| `mid` | Gemma4-Coder 12B | RTX 4090 | ~$0.69 |
 | `architecture` | Qwen2.5-Coder 32B | RTX 4090 | ~$0.69 |
 | `maximum` | DeepSeek V3 | L40S 48GB | ~$1.14 |
 | `ultra` | Qwen2.5 72B | A100 80GB | ~$1.89 |
@@ -29,6 +30,7 @@ Prices sync from live RunPod GPU catalog at startup. Budget gate uses projected 
 | Tier | OpenAI | Groq | Together | Mistral | DeepSeek |
 |------|--------|------|----------|---------|----------|
 | `simple` | gpt-4o-mini | llama-3.1-8b-instant | Llama-3.2-11B | mistral-small | deepseek-chat |
+| `mid` | gpt-4o-mini | llama-3.3-70b-versatile | Llama-3.1-70B | mistral-medium | deepseek-chat |
 | `architecture` | gpt-4o | llama-3.3-70b | Llama-3.1-70B | mistral-medium | deepseek-chat |
 | `maximum` | gpt-4o | llama-3.3-70b | Llama-3.1-405B | mistral-large | deepseek-reasoner |
 | `ultra` | gpt-4o | llama-3.3-70b | Llama-3.1-405B | mistral-large | deepseek-reasoner |
@@ -45,6 +47,7 @@ Same Ollama models as pod providers. Zero cost — budget gate skipped.
 
 **Tier models** (direct GPU rental):
 - `llm-simple`
+- `llm-mid`
 - `llm-architecture`
 - `llm-maximum`
 - `llm-ultra`

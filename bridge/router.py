@@ -27,7 +27,7 @@ from database.models import User
 
 log = structlog.get_logger(__name__)
 
-TIER_ORDER = ["simple", "architecture", "maximum", "ultra"]
+TIER_ORDER = ["simple", "mid", "architecture", "maximum", "ultra"]
 
 _POD_PROVIDERS = {"runpod", "vast", "lambda"}
 
@@ -169,6 +169,14 @@ async def select_tier(
     files = request.files_referenced or 0
     allowed = _allowed_tiers(user)
 
+    # Parse "tier:provider" syntax — e.g. model="architecture:groq" forces cerebras tier + groq provider
+    _model_provider_hint: str | None = None
+    if ":" in model_field:
+        _tier_part, _prov_part = model_field.split(":", 1)
+        if _tier_part in TIER_ORDER:
+            model_field = _tier_part
+            _model_provider_hint = _prov_part
+
     # 0. Vision routing — pure image requests route ONLY to the vision tier; never fall through.
     if has_image_content(request.messages) and not requires_non_vision_model(request):
         vision_cfg = _TIERS.get("vision")
@@ -204,7 +212,7 @@ async def select_tier(
             )
         tier = override
         cost = _projected_cost(tier, prompt_tokens)
-        return RoutingDecision(tier=tier, reason=f"explicit override: {override}", projected_cost_usd=cost)
+        return RoutingDecision(tier=tier, reason=f"explicit override: {override}", projected_cost_usd=cost, provider_override=_model_provider_hint)
 
     # 2. Prompt tier hint — @architecture, "use maximum tier", [simple], tier:ultra
     hint = _prompt_tier_hint(_last_user_text(request))

@@ -60,6 +60,8 @@ services:
     env_file: .env
     environment:
       MOCK_PROVIDERS: ${MOCK_PROVIDERS:-}
+    volumes:
+      - ./config/tiers.yaml:/app/config/tiers.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +86,22 @@ services:
         condition: service_started
     ports:
       - "${DASHBOARD_PORT:-8501}:8501"
+    networks: [internal, external]
+
+  ccr:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ccr
+    restart: unless-stopped
+    volumes:
+      - ./config/ccr-config.json:/root/.claude-code-router/config.json:ro
+    environment:
+      CCR_BRIDGE_API_KEY: ${CCR_BRIDGE_API_KEY}
+    depends_on:
+      bridge:
+        condition: service_started
+    ports:
+      - "${CCR_PORT:-3456}:3456"
     networks: [internal, external]
 
   openwebui:

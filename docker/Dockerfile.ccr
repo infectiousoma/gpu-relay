@@ -1,0 +1,15 @@
+FROM node:20-alpine
+
+RUN apk add --no-cache netcat-openbsd && \
+    npm install -g @musistudio/claude-code-router
+
+COPY docker/ccr-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Config mounted at runtime: ./config/ccr-config.json -> /root/.claude-code-router/config.json
+EXPOSE 3456
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
+    CMD nc -z 127.0.0.1 3456 || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]
