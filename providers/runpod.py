@@ -221,6 +221,10 @@ class RunPodProvider(BaseProvider):
                 log.info("runpod_pod_terminated", external_id=external_id, attempt=attempt + 1)
                 return
             except Exception as exc:
+                if "not found" in str(exc).lower():
+                    # Pod already gone from RunPod — treat as terminated
+                    log.info("runpod_pod_already_gone", external_id=external_id)
+                    return
                 if attempt < 2:
                     wait = 4 * (attempt + 1)
                     log.warning(

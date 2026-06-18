@@ -189,6 +189,52 @@ class EmbeddingResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Admin user management
+# ---------------------------------------------------------------------------
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    role: str = "user"
+    billing_mode: str = "postpaid"
+    budget_usd: float = 25.0
+    sync_openwebui: bool = False
+    create_api_key: bool = False
+
+
+class CreateUserResponse(BaseModel):
+    user_id: str
+    email: str
+    api_key: str | None = None
+    key_prefix: str | None = None
+    openwebui_synced: bool = False
+    pipeline_synced: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Usage summary
+# ---------------------------------------------------------------------------
+
+class UsagePeriod(BaseModel):
+    period: str
+    total_requests: int
+    ok_requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+
+
+class UsageResponse(BaseModel):
+    user_id: str
+    email: str
+    monthly_budget_usd: float
+    prepaid_balance_usd: float
+    billing_mode: str
+    this_month: UsagePeriod
+    last_30_days: list[UsagePeriod]
+
+
+# ---------------------------------------------------------------------------
 # Error envelope (OpenAI-shaped)
 # ---------------------------------------------------------------------------
 

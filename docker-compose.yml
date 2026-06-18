@@ -104,18 +104,60 @@ services:
       - "${CCR_PORT:-3456}:3456"
     networks: [internal, external]
 
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    restart: unless-stopped
+    environment:
+      PIPELINES_DIR: /app/pipelines
+      PIPELINES_API_KEY: ${PIPELINES_API_KEY:-change-me-pipelines-secret}
+    volumes:
+      - ./pipelines:/app/pipelines
+    ports:
+      - "${PIPELINES_PORT:-9099}:9099"
+    networks: [internal, external]
+
+  workspace-tools:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.workspace-tools
+    restart: unless-stopped
+    environment:
+      WORKSPACE_ROOT: /workspace
+      MAX_EXEC_TIMEOUT: ${WORKSPACE_EXEC_TIMEOUT:-30}
+      MAX_FILE_SIZE_MB: ${WORKSPACE_MAX_FILE_MB:-10}
+    volumes:
+      - ./workspace_data:/workspace
+    ports:
+      - "${WORKSPACE_TOOLS_PORT:-7000}:7000"
+    networks: [internal, external]
+
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
     restart: unless-stopped
     environment:
       WEBUI_SECRET_KEY: ${OPENWEBUI_SECRET_KEY:-change-me}
+      # Bridge as primary OpenAI-compatible backend (all GPU/API providers)
       OPENAI_API_BASE_URL: ${OPENWEBUI_BRIDGE_URL:-http://bridge:8000}/v1
-      OPENAI_API_KEY: "set-via-ui-or-env"
+      OPENAI_API_KEY: ${OPENWEBUI_BRIDGE_API_KEY:-}
       ENABLE_OLLAMA_API: "false"
+      # Anthropic native integration (Claude models direct, no bridge)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Image generation (set ENGINE to openai for DALL-E via bridge, or comfyui/automatic1111)
+      ENABLE_IMAGE_GENERATION: ${ENABLE_IMAGE_GENERATION:-false}
+      IMAGE_GENERATION_ENGINE: ${IMAGE_GENERATION_ENGINE:-openai}
+      IMAGES_OPENAI_API_BASE_URL: ${IMAGES_OPENAI_API_BASE_URL:-http://bridge:8000/v1}
+      IMAGES_OPENAI_API_KEY: ${IMAGES_OPENAI_API_KEY:-}
+      # Workspace tools service URL (used by the Tool shim)
+      WORKSPACE_TOOLS_URL: http://workspace-tools:7000
+      USER_PERMISSIONS_WORKSPACE_CONNECTIONS_ACCESS: "true"
+      ENABLE_DIRECT_CONNECTIONS: "true"
     volumes:
       - openwebui_data:/app/backend/data
+      - ./workspace_data:/workspace
     depends_on:
       bridge:
+        condition: service_started
+      workspace-tools:
         condition: service_started
     ports:
       - "3000:8080"

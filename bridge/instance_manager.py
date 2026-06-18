@@ -384,6 +384,7 @@ class InstanceManager:
             if _alt_model and _alt_model != info.model:
                 try:
                     await self._pull_model(endpoint, _alt_model, pod_id)
+                    await self._warmup_model(endpoint, _alt_model, pod_id)
                 except Exception:
                     log.warning("alt_model_pull_skipped", pod_id=pod_id, model=_alt_model)
         else:

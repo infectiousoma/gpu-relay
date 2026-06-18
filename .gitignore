@@ -36,3 +36,10 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Workspace (user-generated files via Open WebUI tools)
+workspace_data/
+
+# Pipelines runtime data (pipeline Python files are tracked, not runtime state)
+pipelines/__pycache__/
+pipelines/gpu_relay_router/
