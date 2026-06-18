@@ -6,7 +6,7 @@ The bridge supports four provider categories, mixed freely via `PROVIDER_PRIORIT
 |----------|------|-------------|
 | `runpod`, `vast`, `lambda` | Cloud GPU pod | Rents a GPU, launches Ollama, terminates when idle |
 | `local` | Local GPU | Routes to Ollama on this machine — zero cloud cost |
-| `openai`, `groq`, `together`, `mistral`, `deepseek` | Commercial API | Calls vendor API directly — no pod management |
+| `openai`, `groq`, `cerebras`, `sambanova`, `together`, `mistral`, `deepseek` | Commercial API | Calls vendor API directly — no pod management |
 | `together_dedicated` | Dedicated GPU pod | Spins up a Together reserved GPU endpoint for vision models; no Ollama — inference via Together API |
 
 ```
@@ -167,13 +167,15 @@ PROVIDER_PRIORITY=openai,runpod    # OpenAI first, RunPod as fallback
 OPENAI_API_KEY=sk-...
 ```
 
-| Provider | Key var | Default models (simple / architecture / maximum / ultra) |
-|----------|---------|----------------------------------------------------------|
-| `openai` | `OPENAI_API_KEY` | gpt-4o-mini / gpt-4o / gpt-4o / gpt-4o |
-| `groq` | `GROQ_API_KEY` | llama-3.1-8b-instant / llama-3.3-70b / llama-3.3-70b / llama-3.3-70b |
-| `together` | `TOGETHER_API_KEY` | Llama-3.2-11B / Llama-3.1-70B / Llama-3.1-405B / Llama-3.1-405B |
-| `mistral` | `MISTRAL_API_KEY` | mistral-small / mistral-medium / mistral-large / mistral-large |
-| `deepseek` | `DEEPSEEK_API_KEY` | deepseek-chat / deepseek-chat / deepseek-reasoner / deepseek-reasoner |
+| Provider | Key var | Default models (simple / mid / architecture / maximum / ultra) |
+|----------|---------|----------------------------------------------------------------|
+| `openai` | `OPENAI_API_KEY` | gpt-4o-mini / gpt-4o-mini / gpt-4o / gpt-4o / gpt-4o |
+| `groq` | `GROQ_API_KEY` | llama-3.1-8b-instant / llama-3.3-70b / llama-3.3-70b / llama-3.3-70b / llama-3.3-70b |
+| `cerebras` | `CEREBRAS_API_KEY` | zai-glm-4.7 / gpt-oss-120b / gpt-oss-120b / gpt-oss-120b / gpt-oss-120b |
+| `sambanova` | `SAMBANOVA_API_KEY` | Llama-3.1-8B / Llama-3.3-70B / Llama-3.3-70B / Llama-3.3-70B / Llama-3.1-405B |
+| `together` | `TOGETHER_API_KEY` | Llama-3.2-11B / Llama-3.1-70B / Llama-3.1-70B / Llama-3.1-405B / Llama-3.1-405B |
+| `mistral` | `MISTRAL_API_KEY` | mistral-small / mistral-medium / mistral-medium / mistral-large / mistral-large |
+| `deepseek` | `DEEPSEEK_API_KEY` | deepseek-chat / deepseek-chat / deepseek-chat / deepseek-reasoner / deepseek-reasoner |
 
 > **Together serverless vs dedicated**: The `together` provider uses Together's serverless API (pay-per-token, text models only). Vision models on Together require dedicated endpoints — use `together_dedicated` instead, which is listed separately under Vision below.
 

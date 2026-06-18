@@ -568,7 +568,7 @@
     ├─ [ultra]                 ──────────────────────── ▶ RunPod  A100 80GB  ~$1.89/hr
     ├─ [vision]                ──────────────────────── ▶ Together Dedicated / RunPod MiniCPM-V
     ├─ [cloud fallback]        ──────────────────────── ▶ Vast.ai → Lambda Labs
-    └─ [commercial]            ──────────────────────── ▶ OpenAI / Groq / Together / Mistral / DeepSeek
+    └─ [commercial]            ──────────────────────── ▶ OpenAI / Groq / Cerebras / SambaNova / Together / Mistral / DeepSeek
 
  PREPROCESSOR ─── local Ollama 7B (qwen2.5-coder) rewrites prompt before cloud inference
 
@@ -795,12 +795,13 @@ curl -H "Authorization: Bearer $API_KEY" \
     <h3>API Provider Model Mapping</h3>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Tier</th><th>OpenAI</th><th>Groq</th><th>Together</th><th>Mistral</th><th>DeepSeek</th></tr></thead>
+        <thead><tr><th>Tier</th><th>OpenAI</th><th>Groq</th><th>Cerebras</th><th>SambaNova</th><th>Together</th><th>Mistral</th><th>DeepSeek</th></tr></thead>
         <tbody>
-          <tr><td>simple</td><td>gpt-4o-mini</td><td>llama-3.1-8b-instant</td><td>Llama-3.2-11B</td><td>mistral-small</td><td>deepseek-chat</td></tr>
-          <tr><td>architecture</td><td>gpt-4o</td><td>llama-3.3-70b</td><td>Llama-3.1-70B</td><td>mistral-medium</td><td>deepseek-chat</td></tr>
-          <tr><td>maximum</td><td>gpt-4o</td><td>llama-3.3-70b</td><td>Llama-3.1-405B</td><td>mistral-large</td><td>deepseek-reasoner</td></tr>
-          <tr><td>ultra</td><td>gpt-4o</td><td>llama-3.3-70b</td><td>Llama-3.1-405B</td><td>mistral-large</td><td>deepseek-reasoner</td></tr>
+          <tr><td>simple</td><td>gpt-4o-mini</td><td>llama-3.1-8b-instant</td><td>zai-glm-4.7</td><td>Llama-3.1-8B</td><td>Llama-3.2-11B</td><td>mistral-small</td><td>deepseek-chat</td></tr>
+          <tr><td>mid</td><td>gpt-4o-mini</td><td>llama-3.3-70b</td><td>gpt-oss-120b</td><td>Llama-3.3-70B</td><td>Llama-3.1-70B</td><td>mistral-medium</td><td>deepseek-chat</td></tr>
+          <tr><td>architecture</td><td>gpt-4o</td><td>llama-3.3-70b</td><td>gpt-oss-120b</td><td>Llama-3.3-70B</td><td>Llama-3.1-70B</td><td>mistral-medium</td><td>deepseek-chat</td></tr>
+          <tr><td>maximum</td><td>gpt-4o</td><td>llama-3.3-70b</td><td>—</td><td>—</td><td>Llama-3.1-405B</td><td>mistral-large</td><td>deepseek-reasoner</td></tr>
+          <tr><td>ultra</td><td>gpt-4o</td><td>llama-3.3-70b</td><td>—</td><td>Llama-3.1-405B</td><td>Llama-3.1-405B</td><td>mistral-large</td><td>deepseek-reasoner</td></tr>
         </tbody>
       </table>
     </div>
@@ -992,6 +993,18 @@ CCR_BRIDGE_API_KEY=sk-llm-...   <span class="p"># bridge API key from llmctl use
             <td><span class="chip chip-a">Commercial API</span></td>
             <td><code>GROQ_API_KEY</code></td>
             <td>Llama 3.1/3.3 at high throughput. Pay per token.</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--amber)">Cerebras</strong></td>
+            <td><span class="chip chip-a">Commercial API</span></td>
+            <td><code>CEREBRAS_API_KEY</code></td>
+            <td>zai-glm-4.7 (simple) / gpt-oss-120b (mid–architecture). Extremely fast inference. Pay per token.</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--amber)">SambaNova</strong></td>
+            <td><span class="chip chip-a">Commercial API</span></td>
+            <td><code>SAMBANOVA_API_KEY</code></td>
+            <td>Llama 3.1/3.3 8B–405B. High-throughput inference on custom silicon. Pay per token.</td>
           </tr>
           <tr>
             <td><strong style="color:var(--amber)">Together AI</strong></td>

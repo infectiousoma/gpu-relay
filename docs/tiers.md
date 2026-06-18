@@ -8,7 +8,7 @@
 |------|-------|-----|-------------|
 | `simple` | Qwen2.5-Coder 7B | RTX 4090 | ~$0.69 |
 | `mid` | Gemma4-Coder 12B | RTX 4090 | ~$0.69 |
-| `architecture` | Qwen2.5-Coder 32B | RTX 4090 | ~$0.69 |
+| `architecture` | Qwen2.5 32B (tools) / Qwen2.5-Coder 32B (no-tools) | RTX 4090 | ~$0.69 |
 | `maximum` | DeepSeek V3 | L40S 48GB | ~$1.14 |
 | `ultra` | Qwen2.5 72B | A100 80GB | ~$1.89 |
 | `vision` | Llama-3.2-11B-Vision (Together dedicated) / MiniCPM-V (RunPod) | L40 / RTX 4090 | ~$0.69–1.49 |
@@ -25,15 +25,15 @@ All vision models are capable of text too. Endpoint spins up on first image requ
 
 Prices sync from live RunPod GPU catalog at startup. Budget gate uses projected hourly cost.
 
-### API providers (OpenAI / Groq / Together / Mistral / DeepSeek)
+### API providers (OpenAI / Groq / Cerebras / SambaNova / Together / Mistral / DeepSeek)
 
-| Tier | OpenAI | Groq | Together | Mistral | DeepSeek |
-|------|--------|------|----------|---------|----------|
-| `simple` | gpt-4o-mini | llama-3.1-8b-instant | Llama-3.2-11B | mistral-small | deepseek-chat |
-| `mid` | gpt-4o-mini | llama-3.3-70b-versatile | Llama-3.1-70B | mistral-medium | deepseek-chat |
-| `architecture` | gpt-4o | llama-3.3-70b | Llama-3.1-70B | mistral-medium | deepseek-chat |
-| `maximum` | gpt-4o | llama-3.3-70b | Llama-3.1-405B | mistral-large | deepseek-reasoner |
-| `ultra` | gpt-4o | llama-3.3-70b | Llama-3.1-405B | mistral-large | deepseek-reasoner |
+| Tier | OpenAI | Groq | Cerebras | SambaNova | Together | Mistral | DeepSeek |
+|------|--------|------|----------|-----------|----------|---------|----------|
+| `simple` | gpt-4o-mini | llama-3.1-8b-instant | zai-glm-4.7 | Llama-3.1-8B | Llama-3.2-11B | mistral-small | deepseek-chat |
+| `mid` | gpt-4o-mini | llama-3.3-70b-versatile | gpt-oss-120b | Llama-3.3-70B | Llama-3.1-70B | mistral-medium | deepseek-chat |
+| `architecture` | gpt-4o | llama-3.3-70b | gpt-oss-120b | Llama-3.3-70B | Llama-3.1-70B | mistral-medium | deepseek-chat |
+| `maximum` | gpt-4o | llama-3.3-70b | — | — | Llama-3.1-405B | mistral-large | deepseek-reasoner |
+| `ultra` | gpt-4o | llama-3.3-70b | — | Llama-3.1-405B | Llama-3.1-405B | mistral-large | deepseek-reasoner |
 
 API providers are billed per token (not per hour). Cost = `(prompt_tokens/1K × input_rate) + (completion_tokens/1K × output_rate)` using rates from `config/tiers.yaml` → `api_token_costs`. Update that section when a provider changes pricing — no code change needed.
 
