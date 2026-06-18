@@ -84,8 +84,11 @@ def write_file(req: WriteRequest):
     if path.exists() and path.stat().st_size > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="File size exceeds limit")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(req.content, encoding=req.encoding)
-    return {"written": str(path.relative_to(WORKSPACE_ROOT)), "bytes": len(req.content.encode())}
+    # Models sometimes pass literal \n \t instead of real whitespace — decode them.
+    content = req.content.encode("raw_unicode_escape").decode("unicode_escape") \
+        if "\\n" in req.content or "\\t" in req.content else req.content
+    path.write_text(content, encoding=req.encoding)
+    return {"written": str(path.relative_to(WORKSPACE_ROOT)), "bytes": len(content.encode())}
 
 
 @app.get("/files/read")
