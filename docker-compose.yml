@@ -114,7 +114,7 @@ services:
       MAX_EXEC_TIMEOUT: ${WORKSPACE_EXEC_TIMEOUT:-30}
       MAX_FILE_SIZE_MB: ${WORKSPACE_MAX_FILE_MB:-10}
     volumes:
-      - workspace_data:/workspace
+      - ./workspace_data:/workspace
     ports:
       - "${WORKSPACE_TOOLS_PORT:-7000}:7000"
     networks: [internal, external]
@@ -139,7 +139,7 @@ services:
       WORKSPACE_TOOLS_URL: http://workspace-tools:7000
     volumes:
       - openwebui_data:/app/backend/data
-      - workspace_data:/workspace
+      - ./workspace_data:/workspace
     depends_on:
       bridge:
         condition: service_started
@@ -154,7 +154,6 @@ volumes:
   redis_data:
   ollama_data:
   openwebui_data:
-  workspace_data:
 
 networks:
   internal:

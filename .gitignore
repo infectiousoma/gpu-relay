@@ -38,4 +38,4 @@ logs/
 Thumbs.db
 
 # Workspace (user-generated files via Open WebUI tools)
-workspace/
+workspace_data/
