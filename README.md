@@ -1,5 +1,7 @@
 # Self-Hosted LLM Infrastructure
 
+**[Website](https://infectiousoma.github.io/gpu-relay/)** · [Architecture Diagram](docs/diagrams/architecture.md)
+
 Multi-tenant, OpenAI-compatible LLM gateway. Route requests to cloud GPU pods (RunPod, Vast.ai, Lambda Labs), a local GPU, or commercial APIs — all behind one API endpoint.
 
 **Use cases:**

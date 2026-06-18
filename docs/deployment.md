@@ -4,14 +4,14 @@ Two independent publishing surfaces:
 
 | Surface | Source | URL pattern |
 |---------|--------|-------------|
-| **GitHub Pages** (website) | `docs/index.html` on `master` | `https://<user>.github.io/<repo>/` |
+| **GitHub Pages** (website) | `docs/web/index.html` on `master` (root redirects via `docs/index.html`) | `https://<user>.github.io/<repo>/` |
 | **GitHub Wiki** (markdown docs) | `docs/*.md` pushed to wiki | `https://github.com/<user>/<repo>/wiki` |
 
 ---
 
 ## GitHub Pages (the visual site)
 
-The site lives entirely in `docs/index.html` — no build step, no Jekyll.
+The site lives in `docs/web/index.html` — no build step, no Jekyll. `docs/index.html` is a meta-refresh redirect to `./web/` so the root URL still works with GitHub Pages serving from `/docs`.
 
 ### Enable on GitHub
 
@@ -41,7 +41,7 @@ docs/screenshots/openwebui-models.png
 
 ### Update site content
 
-Edit `docs/index.html` directly — all CSS and JS are inline.
+Edit `docs/web/index.html` directly — all CSS and JS are inline.
 Content sections map to anchors: `#overview`, `#architecture`, `#install`, `#usage`, `#providers`, `#cli`, `#screenshots`.
 
 ---
