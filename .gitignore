@@ -42,3 +42,4 @@ workspace_data/
 
 # Pipelines runtime data (pipeline Python files are tracked, not runtime state)
 pipelines/__pycache__/
+pipelines/gpu_relay_router/
