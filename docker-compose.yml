@@ -104,6 +104,18 @@ services:
       - "${CCR_PORT:-3456}:3456"
     networks: [internal, external]
 
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    restart: unless-stopped
+    environment:
+      PIPELINES_DIR: /app/pipelines
+      PIPELINES_API_KEY: ${PIPELINES_API_KEY:-change-me-pipelines-secret}
+    volumes:
+      - ./pipelines:/app/pipelines
+    ports:
+      - "${PIPELINES_PORT:-9099}:9099"
+    networks: [internal, external]
+
   workspace-tools:
     build:
       context: .
@@ -126,7 +138,7 @@ services:
       WEBUI_SECRET_KEY: ${OPENWEBUI_SECRET_KEY:-change-me}
       # Bridge as primary OpenAI-compatible backend (all GPU/API providers)
       OPENAI_API_BASE_URL: ${OPENWEBUI_BRIDGE_URL:-http://bridge:8000}/v1
-      OPENAI_API_KEY: ${OPENWEBUI_BRIDGE_API_KEY:-set-via-ui}
+      OPENAI_API_KEY: ${OPENWEBUI_BRIDGE_API_KEY:-}
       ENABLE_OLLAMA_API: "false"
       # Anthropic native integration (Claude models direct, no bridge)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -137,6 +149,8 @@ services:
       IMAGES_OPENAI_API_KEY: ${IMAGES_OPENAI_API_KEY:-}
       # Workspace tools service URL (used by the Tool shim)
       WORKSPACE_TOOLS_URL: http://workspace-tools:7000
+      USER_PERMISSIONS_WORKSPACE_CONNECTIONS_ACCESS: "true"
+      ENABLE_DIRECT_CONNECTIONS: "true"
     volumes:
       - openwebui_data:/app/backend/data
       - ./workspace_data:/workspace
