@@ -106,6 +106,7 @@ class InstanceManager:
             from providers.api_compat import (
                 OpenAIProvider, GroqProvider, TogetherProvider,
                 MistralProvider, DeepSeekProvider,
+                CerebrasProvider, SambanovaProvider,
             )
             candidates = {
                 "runpod":             RunPodProvider(),
@@ -118,6 +119,8 @@ class InstanceManager:
                 "together":           TogetherProvider(),
                 "mistral":            MistralProvider(),
                 "deepseek":           DeepSeekProvider(),
+                "cerebras":           CerebrasProvider(),
+                "sambanova":          SambanovaProvider(),
             }
             self._providers = {n: p for n, p in candidates.items() if p.is_configured()}
             if not self._providers:
@@ -140,6 +143,28 @@ class InstanceManager:
                     await task
                 except asyncio.CancelledError:
                     pass
+        # Terminate all active pod-type pods so they don't keep running after shutdown.
+        try:
+            async with SessionLocal() as session:
+                result = await session.execute(
+                    select(Pod).where(Pod.status.in_([PodStatus.ready, PodStatus.starting]))
+                )
+                pods = result.scalars().all()
+                now = datetime.now(timezone.utc)
+                for pod in pods:
+                    provider = self._providers.get(pod.provider)
+                    if provider and provider.provider_type == "pod" and pod.external_id and not pod.external_id.startswith("pending-"):
+                        log.info("shutdown_terminate_pod", pod_id=pod.id, provider=pod.provider)
+                        try:
+                            await provider.terminate(pod.external_id)
+                        except Exception as exc:
+                            log.warning("shutdown_terminate_failed", pod_id=pod.id, error=str(exc))
+                    pod.status = PodStatus.terminated
+                    pod.terminated_at = now
+                if pods:
+                    await session.commit()
+        except Exception as exc:
+            log.exception("shutdown_cleanup_error", error=str(exc))
         log.info("instance_manager_stopped")
 
     # ------------------------------------------------------------------
@@ -353,6 +378,14 @@ class InstanceManager:
             endpoint = await self._wait_for_ready(info.endpoint_url, pod_id)
             if info.model:
                 await self._pull_model(endpoint, info.model, pod_id)
+                await self._warmup_model(endpoint, info.model, pod_id)
+            from bridge.router import get_tiers
+            _alt_model = get_tiers().get(tier, {}).get("model_no_tools")
+            if _alt_model and _alt_model != info.model:
+                try:
+                    await self._pull_model(endpoint, _alt_model, pod_id)
+                except Exception:
+                    log.warning("alt_model_pull_skipped", pod_id=pod_id, model=_alt_model)
         else:
             # Provider handled readiness in launch(); endpoint is already serving.
             endpoint = info.endpoint_url
@@ -500,15 +533,36 @@ class InstanceManager:
         log.info("pulling_model", pod_id=pod_id, model=model)
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=600, write=30, pool=10)) as client:
             try:
-                r = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{endpoint_url}/api/pull",
-                    json={"model": model, "stream": False},
-                )
-                r.raise_for_status()
+                    json={"model": model, "stream": True},
+                ) as r:
+                    r.raise_for_status()
+                    async for _ in r.aiter_lines():
+                        pass  # consume progress stream to prevent proxy timeout on large models
                 log.info("model_pulled", pod_id=pod_id, model=model)
             except Exception as exc:
                 log.warning("model_pull_failed", pod_id=pod_id, model=model, error=str(exc))
                 raise
+
+    async def _warmup_model(self, endpoint_url: str, model: str, pod_id: str) -> None:
+        """Send a minimal inference to force the model into VRAM before marking pod ready."""
+        log.info("warming_up_model", pod_id=pod_id, model=model)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10)) as client:
+            try:
+                r = await client.post(
+                    f"{endpoint_url}/v1/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 1,
+                        "stream": False,
+                    },
+                )
+                log.info("model_warmed_up", pod_id=pod_id, model=model, status=r.status_code)
+            except Exception as exc:
+                log.warning("warmup_failed", pod_id=pod_id, model=model, error=str(exc))
 
     async def _cleanup_stale_pods(self) -> None:
         """On startup, mark provisioning/starting pods as failed.
@@ -552,31 +606,32 @@ class InstanceManager:
                 log.info("reset_api_provider_pods", count=len(pods), providers=api_providers)
 
     async def _cleanup_dedicated_pods(self) -> None:
-        """On startup, terminate any stale dedicated-endpoint pods from prior sessions.
+        """On startup, terminate any stale pod-type pods from prior sessions.
 
-        Unlike API providers, dedicated pods have real running infrastructure that
-        costs money. Delete them from the DB and fire terminate() so Together
-        deallocates the GPU.
+        All pod providers (RunPod, Vast, Lambda, Together-dedicated) have real
+        running infrastructure that costs money. Terminate and delete their DB rows
+        so the bridge starts clean.
         """
-        dedicated_providers = [
+        pod_providers = [
             name for name, p in self._providers.items()
-            if p.provider_type == "pod" and not getattr(p, "needs_ollama_check", True)
+            if p.provider_type == "pod"
         ]
-        if not dedicated_providers:
+        if not pod_providers:
             return
         async with SessionLocal() as session:
             result = await session.execute(
-                select(Pod).where(Pod.provider.in_(dedicated_providers))
+                select(Pod).where(Pod.provider.in_(pod_providers))
             )
             pods = result.scalars().all()
             for pod in pods:
                 provider = self._providers.get(pod.provider)
                 if provider and pod.external_id and not pod.external_id.startswith("pending-"):
+                    log.info("startup_terminate_pod", pod_id=pod.id, provider=pod.provider, status=pod.status)
                     asyncio.create_task(provider.terminate(pod.external_id))
                 await session.delete(pod)
             await session.commit()
             if pods:
-                log.info("cleanup_dedicated_pods", count=len(pods), providers=dedicated_providers)
+                log.info("cleanup_dedicated_pods", count=len(pods), providers=pod_providers)
 
     def _handle(self, pod: Pod, *, cold_start: bool) -> PodHandle:
         provider = self._providers.get(pod.provider)

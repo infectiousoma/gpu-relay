@@ -55,7 +55,19 @@ tiers:
     gpu: RTX_4090
     model: gemma4-coder:12b-q4_K_M
     provider_overrides:
-      [local, runpod, vast, lambda, groq, openai, together, mistral, deepseek]
+      [
+        local,
+        cerebras,
+        sambanova,
+        runpod,
+        vast,
+        lambda,
+        groq,
+        openai,
+        together,
+        mistral,
+        deepseek,
+      ]
     vram_gb: 8
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 300
@@ -71,15 +83,30 @@ tiers:
       local: gemma4-coder:12b-q4_K_M
       openai: gpt-4o-mini
       groq: llama-3.3-70b-versatile
+      cerebras: gpt-oss-120b
+      sambanova: Meta-Llama-3.3-70B-Instruct
       together: meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
       mistral: mistral-medium-latest
       deepseek: deepseek-chat
 
   architecture:
     gpu: RTX_4090
-    model: qwen2.5-coder:32b-instruct-q4_K_M
+    model: qwen2.5:32b-instruct-q4_K_M
+    model_no_tools: qwen2.5-coder:32b-instruct-q4_K_M
     provider_overrides:
-      [groq, local, runpod, vast, lambda, openai, together, mistral, deepseek]
+      [
+        runpod,
+        cerebras,
+        sambanova,
+        local,
+        vast,
+        lambda,
+        groq,
+        openai,
+        together,
+        mistral,
+        deepseek,
+      ]
     vram_gb: 18
     cost_per_hour_usd: 0.69
     idle_timeout_sec: 600
@@ -100,6 +127,8 @@ tiers:
       local: qwen2.5-coder:32b-instruct-q4_K_M
       openai: gpt-4o
       groq: llama-3.3-70b-versatile
+      cerebras: gpt-oss-120b
+      sambanova: Meta-Llama-3.3-70B-Instruct
       together: meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
       mistral: mistral-medium-latest
       deepseek: deepseek-chat
@@ -182,6 +211,16 @@ api_token_costs:
   deepseek:
     deepseek-chat: { input_per_1k: 0.000270, output_per_1k: 0.001100 }
     deepseek-reasoner: { input_per_1k: 0.000550, output_per_1k: 0.002190 }
+  cerebras:
+    zai-glm-4.7: { input_per_1k: 0.000100, output_per_1k: 0.000100 }
+    gpt-oss-120b: { input_per_1k: 0.000600, output_per_1k: 0.000600 }
+  sambanova:
+    Meta-Llama-3.1-8B-Instruct:
+      { input_per_1k: 0.000100, output_per_1k: 0.000200 }
+    Meta-Llama-3.3-70B-Instruct:
+      { input_per_1k: 0.000600, output_per_1k: 0.001200 }
+    Meta-Llama-3.1-405B-Instruct:
+      { input_per_1k: 0.005000, output_per_1k: 0.010000 }
 
 # Provider priority. Bridge tries left-to-right; falls back on capacity/error.
 providers:

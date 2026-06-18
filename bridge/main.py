@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json as _json
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -345,6 +346,7 @@ async def chat_completions(
     start_ms = int(time.time() * 1000)
     error_message: str | None = None
     completion_text = ""
+    completion_tool_calls: list | None = None
     prompt_tokens = 0
     completion_tokens = 0
 
@@ -361,26 +363,59 @@ async def chat_completions(
         else:
             # --- Standard non-streaming ---
             _tier_max = get_tiers().get(decision.tier, {}).get("max_context_tokens")
-            payload = _build_inference_payload(body, stream=False, model=pod.model or None, messages=resolved_messages, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS, provider=pod.provider)
-            async with httpx.AsyncClient(timeout=300) as client:
-                r = await client.post(
-                    f"{pod.endpoint_url}/v1/chat/completions",
-                    json=payload,
-                    headers=pod.extra_headers,
-                )
+            _has_tools = bool(body.tools)
+            _tier_cfg = get_tiers().get(decision.tier, {})
+            _effective_model = pod.model or None
+            if pod.provider in _OLLAMA_PROVIDERS and not _has_tools:
+                _no_tools_model = _tier_cfg.get("model_no_tools")
+                if _no_tools_model:
+                    _effective_model = _no_tools_model
+            payload = _build_inference_payload(body, stream=False, model=_effective_model, messages=resolved_messages, max_tokens_cap=_tier_max, slim_tools=True, strip_cache_control=pod.provider not in _OLLAMA_PROVIDERS, provider=pod.provider)
+            _max_retries = 3
+            for _attempt in range(_max_retries):
+                async with httpx.AsyncClient(timeout=300) as client:
+                    r = await client.post(
+                        f"{pod.endpoint_url}/v1/chat/completions",
+                        json=payload,
+                        headers=pod.extra_headers,
+                    )
+                if r.status_code == 429 and _attempt < _max_retries - 1:
+                    err_body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                    err_msg = err_body.get("error", {}).get("message", "")
+                    import re as _re
+                    _m = _re.search(r"try again in ([0-9.]+)s", err_msg)
+                    _wait = float(_m.group(1)) if _m else 30.0
+                    _wait = min(_wait + 1.0, 60.0)
+                    log.warning("rate_limit_retry", attempt=_attempt + 1, wait_s=_wait, provider=pod.provider)
+                    await asyncio.sleep(_wait)
+                    continue
                 if not r.is_success:
                     err_text = r.text[:2000]
                     log.error("inference_http_error", status=r.status_code, provider=pod.provider, body=err_text)
+                    _is_model_not_found = r.status_code == 404 and "not found" in err_text.lower()
+                    if _is_model_not_found and _effective_model != pod.model and pod.model:
+                        log.warning("alt_model_not_found_fallback", alt=_effective_model, primary=pod.model)
+                        _effective_model = pod.model
+                        payload = _build_inference_payload(body, stream=False, model=_effective_model, messages=resolved_messages, max_tokens_cap=_tier_max, slim_tools=True, strip_cache_control=pod.provider not in _OLLAMA_PROVIDERS, provider=pod.provider)
+                        continue
                     raise Exception(f"Provider {pod.provider} HTTP {r.status_code}: {err_text}")
-                data = r.json()
+                break
+            data = r.json()
 
             choice = data["choices"][0]
-            completion_text = choice["message"]["content"]
+            completion_text = choice["message"].get("content")
+            completion_tool_calls = choice["message"].get("tool_calls")
+            if completion_tool_calls and pod.provider in _OLLAMA_PROVIDERS:
+                for tc in completion_tool_calls:
+                    fn = tc.get("function", {})
+                    if isinstance(fn.get("arguments"), str):
+                        fn["arguments"] = fn["arguments"].replace("\\n", "\n")
             prompt_tokens = data.get("usage", {}).get("prompt_tokens", prompt_tokens_est)
             completion_tokens = data.get("usage", {}).get("completion_tokens", 0)
 
-            # Postprocess
-            completion_text = await run_postprocess(completion_text, pipeline, pipeline_meta)
+            # Postprocess (only for text responses)
+            if completion_text is not None:
+                completion_text = await run_postprocess(completion_text, pipeline, pipeline_meta)
 
     except Exception as exc:
         error_message = str(exc)
@@ -413,8 +448,12 @@ async def chat_completions(
         choices=[
             ChatCompletionChoice(
                 index=0,
-                message=ChatMessage(role="assistant", content=completion_text),
-                finish_reason="stop",
+                message=ChatMessage(
+                    role="assistant",
+                    content=completion_text,
+                    tool_calls=completion_tool_calls,
+                ),
+                finish_reason="tool_calls" if completion_tool_calls else "stop",
             )
         ],
         usage=Usage(
@@ -442,6 +481,27 @@ async def chat_completions(
     return JSONResponse(content=response.model_dump(), headers=headers)
 
 
+def _fix_tool_arg_escaping(raw_chunk: str) -> str:
+    """Ollama models sometimes emit \\n as literal backslash-n in tool call arguments
+    instead of real newlines. Fix before forwarding so file writes get real newlines."""
+    if '"arguments"' not in raw_chunk:
+        return raw_chunk
+    try:
+        data = _json.loads(raw_chunk)
+        changed = False
+        for choice in data.get("choices", []):
+            delta = choice.get("delta", {})
+            for tc in delta.get("tool_calls", []) or []:
+                fn = tc.get("function", {})
+                args = fn.get("arguments")
+                if isinstance(args, str) and "\\n" in args:
+                    fn["arguments"] = args.replace("\\n", "\n")
+                    changed = True
+        return _json.dumps(data) if changed else raw_chunk
+    except Exception:
+        return raw_chunk
+
+
 async def _stream_response(
     body, pod, decision, pipeline, pipeline_meta,
     user, session, redis, manager, request,
@@ -455,7 +515,14 @@ async def _stream_response(
             base = _sanitize_messages_for_api_vision(base)
         resolved = _inject_vision_system(base)
     _tier_max = get_tiers().get(decision.tier, {}).get("max_context_tokens")
-    payload = _build_inference_payload(body, stream=True, model=pod.model or None, messages=resolved, max_tokens_cap=_tier_max, slim_tools=pod.provider not in _OLLAMA_PROVIDERS, provider=pod.provider)
+    _has_tools = bool(body.tools)
+    _tier_cfg = get_tiers().get(decision.tier, {})
+    _effective_model = pod.model or None
+    if pod.provider in _OLLAMA_PROVIDERS and not _has_tools:
+        _no_tools_model = _tier_cfg.get("model_no_tools")
+        if _no_tools_model:
+            _effective_model = _no_tools_model
+    payload = _build_inference_payload(body, stream=True, model=_effective_model, messages=resolved, max_tokens_cap=_tier_max, slim_tools=True, strip_cache_control=pod.provider not in _OLLAMA_PROVIDERS, provider=pod.provider)
 
     async def event_generator():
         start_ms = int(time.time() * 1000)
@@ -463,13 +530,30 @@ async def _stream_response(
         prompt_tokens = max(1, sum(len(m.text_content()) for m in body.messages) // 4)
         completion_tokens = 0
         error_message = None
+        _active_payload = payload
         try:
             async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream("POST", f"{pod.endpoint_url}/v1/chat/completions", json=payload, headers=pod.extra_headers) as resp:
+                async with client.stream("POST", f"{pod.endpoint_url}/v1/chat/completions", json=_active_payload, headers=pod.extra_headers) as resp:
                     if not resp.is_success:
                         err_body = await resp.aread()
                         err_text = err_body.decode(errors="replace")[:2000]
                         log.error("inference_http_error", status=resp.status_code, provider=pod.provider, body=err_text)
+                        # Model-not-found: alt model not yet pulled — fall back to pod's primary model.
+                        if resp.status_code == 404 and "not found" in err_text and _active_payload.get("model") != pod.model:
+                            log.warning("alt_model_not_found_fallback", requested=_active_payload.get("model"), fallback=pod.model)
+                            _active_payload = {**_active_payload, "model": pod.model}
+                            async with client.stream("POST", f"{pod.endpoint_url}/v1/chat/completions", json=_active_payload, headers=pod.extra_headers) as resp2:
+                                if not resp2.is_success:
+                                    err2 = (await resp2.aread()).decode(errors="replace")[:2000]
+                                    raise Exception(f"Provider {pod.provider} HTTP {resp2.status_code}: {err2}")
+                                async for line in resp2.aiter_lines():
+                                    if line.startswith("data: "):
+                                        chunk = line[6:]
+                                        if chunk.strip() == "[DONE]":
+                                            yield "data: [DONE]\n\n"
+                                            break
+                                        yield f"{line}\n\n"
+                            return
                         raise Exception(f"Provider {pod.provider} HTTP {resp.status_code}: {err_text}")
                     async for line in resp.aiter_lines():
                         if line.startswith("data: "):
@@ -477,10 +561,11 @@ async def _stream_response(
                             if chunk.strip() == "[DONE]":
                                 yield "data: [DONE]\n\n"
                                 break
-                            yield f"{line}\n\n"
+                            if pod.provider in _OLLAMA_PROVIDERS:
+                                chunk = _fix_tool_arg_escaping(chunk)
+                            yield f"data: {chunk}\n\n"
                             try:
-                                import json
-                                data = json.loads(chunk)
+                                data = _json.loads(chunk)
                                 delta = data["choices"][0].get("delta", {}).get("content", "")
                                 completion_tokens += len(delta) // 4
                             except Exception:
@@ -490,8 +575,10 @@ async def _stream_response(
             log.exception("stream_error", pod_id=pod.pod_id)
             # Mark pod failed so it's not reused on next request.
             # API providers: model_not_available / non-serverless error bodies.
-            # Ollama pods: HTTP 404 means model was evicted from the container.
-            if any(s in error_message for s in ("model_not_available", "non-serverless", "HTTP 404")):
+            # Ollama pods: HTTP 404 means model was evicted — but "not found" is model-not-yet-pulled,
+            # which is recoverable (fallback above handles it), so don't kill the pod for that.
+            _is_model_not_found = "HTTP 404" in error_message and "not found" in error_message
+            if not _is_model_not_found and any(s in error_message for s in ("model_not_available", "non-serverless", "HTTP 404")):
                 asyncio.create_task(manager.mark_pod_failed(pod.pod_id))
         finally:
             latency_ms = int(time.time() * 1000) - start_ms
@@ -675,10 +762,19 @@ def _build_inference_payload(
     messages: list | None = None,
     max_tokens_cap: int | None = None,
     slim_tools: bool = False,
+    strip_cache_control: bool = False,
     provider: str | None = None,
 ) -> dict:
+    def _strip_cc(content):
+        if isinstance(content, list):
+            return [{k: v for k, v in part.items() if k != "cache_control"} for part in content]
+        return content
+
     def _serialize_message(m: ChatMessage) -> dict:
-        d: dict = {"role": m.role, "content": m.content}
+        content = m.content
+        if strip_cache_control:
+            content = _strip_cc(content)
+        d: dict = {"role": m.role, "content": content}
         if m.name is not None:
             d["name"] = m.name
         if m.tool_call_id is not None:

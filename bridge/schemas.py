@@ -21,13 +21,15 @@ MessageContent = str | list[ContentPart]
 
 class ChatMessage(BaseModel):
     role: Role
-    content: MessageContent
+    content: MessageContent | None = None
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
 
     def text_content(self) -> str:
         """Flatten content to plain text for routing/preprocessing/token estimation."""
+        if self.content is None:
+            return ""
         if isinstance(self.content, str):
             return self.content
         return " ".join(

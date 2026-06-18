@@ -17,8 +17,8 @@ from dashboard.db import (
 )
 from database.models import User
 
-_ALL_PROVIDERS = ["openai", "groq", "together", "together_dedicated", "mistral", "deepseek", "runpod", "vast", "lambda", "local"]
-_API_PROVIDERS = ["openai", "groq", "together", "mistral", "deepseek"]
+_ALL_PROVIDERS = ["openai", "groq", "cerebras", "sambanova", "together", "together_dedicated", "mistral", "deepseek", "runpod", "vast", "lambda", "local"]
+_API_PROVIDERS = ["openai", "groq", "cerebras", "sambanova", "together", "mistral", "deepseek"]
 _GPU_PROVIDERS = ["runpod", "vast", "lambda"]
 
 

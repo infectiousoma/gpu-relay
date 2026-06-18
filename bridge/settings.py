@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     together_api_key: str = ""
     mistral_api_key: str = ""
     deepseek_api_key: str = ""
+    cerebras_api_key: str = ""
+    sambanova_api_key: str = ""
 
     # --- Pool / reaper ---
     idle_reaper_interval_sec: int = 30

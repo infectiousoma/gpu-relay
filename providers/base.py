@@ -104,7 +104,7 @@ TIER_GPU_PREFERENCE: dict[str, list[str]] = {
 # Ollama model tag per tier
 TIER_MODEL: dict[str, str] = {
     "simple":       "qwen2.5-coder:7b-instruct-q4_K_M",
-    "architecture": "qwen2.5-coder:32b-instruct-q4_K_M",
+    "architecture": "qwen2.5:32b-instruct-q4_K_M",
     "maximum":      "deepseek-v3:latest-q4_K_M",
     "ultra":        "qwen2.5:72b-instruct-q4_K_M",
     "vision":       "minicpm-v",

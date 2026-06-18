@@ -168,3 +168,33 @@ class DeepSeekProvider(OpenAICompatProvider):
 
     def __init__(self) -> None:
         super().__init__(settings.deepseek_api_key)
+
+
+class CerebrasProvider(OpenAICompatProvider):
+    name = "cerebras"
+    _base_url = "https://api.cerebras.ai"
+    _default_models = {
+        "simple":       "zai-glm-4.7",
+        "mid":          "gpt-oss-120b",
+        "architecture": "gpt-oss-120b",
+        "maximum":      "gpt-oss-120b",
+        "ultra":        "gpt-oss-120b",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(settings.cerebras_api_key)
+
+
+class SambanovaProvider(OpenAICompatProvider):
+    name = "sambanova"
+    _base_url = "https://api.sambanova.ai"
+    _default_models = {
+        "simple":       "Meta-Llama-3.1-8B-Instruct",
+        "mid":          "Meta-Llama-3.3-70B-Instruct",
+        "architecture": "Meta-Llama-3.3-70B-Instruct",
+        "maximum":      "Meta-Llama-3.3-70B-Instruct",
+        "ultra":        "Meta-Llama-3.1-405B-Instruct",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(settings.sambanova_api_key)

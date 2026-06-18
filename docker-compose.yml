@@ -60,6 +60,8 @@ services:
     env_file: .env
     environment:
       MOCK_PROVIDERS: ${MOCK_PROVIDERS:-}
+    volumes:
+      - ./config/tiers.yaml:/app/config/tiers.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
