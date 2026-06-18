@@ -14,6 +14,74 @@ _ALL_PROVIDERS = [
     "openai", "together", "together_dedicated", "mistral", "deepseek",
 ]
 
+# Curated model lists per API provider (shown as selectbox options)
+_PROVIDER_KNOWN_MODELS: dict[str, list[str]] = {
+    "openai": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "gpt-4o-2024-08-06",
+        "gpt-4-turbo",
+        "o1-mini",
+        "o3-mini",
+    ],
+    "groq": [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+    ],
+    "cerebras": [
+        "zai-glm-4.7",
+        "gpt-oss-120b",
+    ],
+    "sambanova": [
+        "Meta-Llama-3.1-8B-Instruct",
+        "Meta-Llama-3.3-70B-Instruct",
+        "Meta-Llama-3.1-405B-Instruct",
+        "Qwen2.5-72B-Instruct",
+        "DeepSeek-R1",
+    ],
+    "together": [
+        "meta-llama/Llama-3.1-8B-Instruct-Turbo",
+        "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+        "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+        "meta-llama/Llama-Vision-Free",
+        "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+        "Qwen/Qwen2.5-72B-Instruct-Turbo",
+        "deepseek-ai/DeepSeek-V3",
+    ],
+    "mistral": [
+        "mistral-small-latest",
+        "mistral-medium-latest",
+        "mistral-large-latest",
+        "codestral-latest",
+        "open-mistral-nemo",
+    ],
+    "deepseek": [
+        "deepseek-chat",
+        "deepseek-reasoner",
+    ],
+}
+
+# Known Ollama pod models (for model override dropdowns)
+_POD_MODELS = [
+    "(use tier default)",
+    "qwen2.5-coder:7b-instruct-q4_K_M",
+    "qwen2.5-coder:14b-instruct-q4_K_M",
+    "qwen2.5-coder:32b-instruct-q4_K_M",
+    "qwen2.5:32b-instruct-q4_K_M",
+    "qwen2.5:72b-instruct-q4_K_M",
+    "gemma4-coder:12b-q4_K_M",
+    "deepseek-v3:latest-q4_K_M",
+    "llava:13b",
+    "mistral:7b-instruct-q4_K_M",
+    "llama3.1:8b-instruct-q4_K_M",
+]
+
+_POD_PROVIDERS = {"runpod", "vast", "lambda", "local"}
+
 
 def _headers() -> dict:
     tok = st.session_state.get("bridge_token")
@@ -135,35 +203,66 @@ def render() -> None:
     ov_provider_models: dict = (ov.get("provider_models") or {}) if ov else {}
     new_provider_models: dict[str, str] = {}
 
-    shown_providers = selected_providers or list(tier_provider_models.keys())
-    if shown_providers:
-        cols = st.columns(min(len(shown_providers), 3))
-        for i, prov in enumerate(shown_providers):
-            default_model = ov_provider_models.get(prov) or tier_provider_models.get(prov, "")
-            val = cols[i % 3].text_input(
+    api_providers_shown = [p for p in (selected_providers or list(tier_provider_models.keys())) if p not in _POD_PROVIDERS]
+    if api_providers_shown:
+        cols = st.columns(min(len(api_providers_shown), 3))
+        for i, prov in enumerate(api_providers_shown):
+            tier_default = tier_provider_models.get(prov, "")
+            current = ov_provider_models.get(prov) or tier_default
+            known = _PROVIDER_KNOWN_MODELS.get(prov, [])
+            options = list(dict.fromkeys([tier_default] + known))  # tier default first, deduped
+            if current and current not in options:
+                options.insert(0, current)
+            try:
+                idx = options.index(current) if current else 0
+            except ValueError:
+                idx = 0
+            chosen = cols[i % 3].selectbox(
                 prov,
-                value=default_model,
+                options=options,
+                index=idx,
                 key=f"pm_{selected_tier}_{prov}",
-                placeholder=tier_provider_models.get(prov, ""),
+                help=f"Tier default: {tier_default or '(none)'}",
             )
-            if val.strip():
-                new_provider_models[prov] = val.strip()
+            if chosen and chosen != tier_default:
+                new_provider_models[prov] = chosen
+    else:
+        st.caption("_No API providers selected._")
 
     # ----------------------------------------------------------------
-    # Model overrides
+    # Pod model overrides
     # ----------------------------------------------------------------
-    st.subheader("Model Overrides")
+    st.subheader("Pod Model Override")
+    st.caption(
+        "Override the Ollama model pulled and served on GPU pods (RunPod, Vast, Lambda, local) "
+        "for this tier. Useful if you have a personal RunPod account with a network volume "
+        "and want a different model than the tier default. "
+        "**Does not affect API providers** (OpenAI, Groq, etc.) — use the dropdowns above for those."
+    )
+
+    cur_model_ov = (ov.get("model_override") or "(use tier default)") if ov else "(use tier default)"
+    cur_mnt_ov = (ov.get("model_no_tools_override") or "(use tier default)") if ov else "(use tier default)"
+
+    pod_options = list(dict.fromkeys(["(use tier default)", tier_model] + _POD_MODELS)) if tier_model else _POD_MODELS
+    mnt_options = list(dict.fromkeys(["(use tier default)", tier_model_no_tools or tier_model] + _POD_MODELS)) if tier_model else _POD_MODELS
+
+    def _pod_idx(val: str, opts: list[str]) -> int:
+        try:
+            return opts.index(val) if val in opts else 0
+        except ValueError:
+            return 0
+
     col1, col2 = st.columns(2)
-    model_override_val = col1.text_input(
-        "Model override (all requests)",
-        value=(ov.get("model_override") or "") if ov else "",
-        placeholder=tier_model,
+    model_override_val = col1.selectbox(
+        f"Pod model (tools)  —  default: `{tier_model or 'none'}`",
+        options=pod_options,
+        index=_pod_idx(cur_model_ov, pod_options),
         key=f"mo_{selected_tier}",
     )
-    model_no_tools_val = col2.text_input(
-        "Model (no-tools fallback)",
-        value=(ov.get("model_no_tools_override") or "") if ov else "",
-        placeholder=tier_model_no_tools or tier_model,
+    model_no_tools_val = col2.selectbox(
+        f"Pod model (no tools)  —  default: `{tier_model_no_tools or tier_model or 'same'}`",
+        options=mnt_options,
+        index=_pod_idx(cur_mnt_ov, mnt_options),
         key=f"mnt_{selected_tier}",
     )
 
@@ -201,12 +300,13 @@ def render() -> None:
     )
 
     if save_pressed:
+        _sentinel = "(use tier default)"
         payload = {
             "provider_order": selected_providers or None,
             "disabled_providers": [p for p in _ALL_PROVIDERS if p not in selected_providers] or None,
             "provider_models": new_provider_models or None,
-            "model_override": model_override_val.strip() or None,
-            "model_no_tools_override": model_no_tools_val.strip() or None,
+            "model_override": model_override_val if model_override_val != _sentinel else None,
+            "model_no_tools_override": model_no_tools_val if model_no_tools_val != _sentinel else None,
             "idle_timeout_sec": int(idle_val) if idle_val != tier_idle else None,
             "max_context_tokens": int(ctx_val) if ctx_val != tier_max_ctx else None,
         }
